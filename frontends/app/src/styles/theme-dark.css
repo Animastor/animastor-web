@@ -1,0 +1,40 @@
+/* Dark "cinema hall" theme — point of entry (Theme.Animastor.CinemaDark) */
+[data-theme="dark"] {
+  --bg: #12110F;
+  --surface: #1B1816;
+  --surface-2: #25211E;
+  --surface-dim: #161412;
+  --text: #F2E9DC;
+  --text-2: #B8AFA3;
+  --text-disabled: #6B655C;
+  --primary-container: #4A141C;
+  --accent-container: #3A2E1A;
+  --on-accent-container: #C9A15A; /* colorOnSecondaryContainer = cinema_accent */
+  --error-container: #4A1C22;
+  --outline: #3D3833;
+  --outline-2: #2D2925;
+  --scrim: rgba(12,10,8,0.5);
+  --missing-bg: rgba(22,20,18,0.8);
+  --subtitle-bg: rgba(0,0,0,0.73);
+  /* Worker panel header — EXACT Android values (GenerateFragment
+     updateHeaderPanelStyle): ON = cinema_worker_panel_on #2D2A26,
+     OFF = cinema_worker_panel_off #25211E. */
+  --worker-panel-on: #2D2A26;
+  --worker-panel-off: #25211E;
+  /* Worker panel header labels — shared middle ground between the old label
+     color (--text #F2E9DC, too bright) and Android's disabled tone #6B655C
+     (too dim): ON = #B8AFA3 (cinema_text_secondary — readable secondary),
+     OFF = #989084 (muted, luminance midpoint to #6B655C). Same hexes as
+     cinema_worker_label_on/off in Android colors.xml. */
+  --worker-label-on: #B8AFA3;
+  --worker-label-off: #989084;
+  --posbar-gradient: linear-gradient(180deg, #2E2A26, #242120);
+  /* Scene/unit panels in the Navigate TOC — EXACT Android values
+     (BookStructureAdapter): scenes colorSurfaceVariant #25211E, units
+     colorSurface #1B1816 (active: colorSecondaryContainer #3A2E1A via
+     --accent-container), on the page bg colorSurfaceDim #161412 (--surface-dim). */
+  --nav-scene-bg: #25211E;
+  --nav-unit-bg: #1B1816;
+
+  --theme-color: #12110F; /* <meta theme-color> */
+}

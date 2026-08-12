@@ -1,0 +1,763 @@
+// Shared TS models — 1:1 with frontend/.../repository/{ConnectorModels,AiChatModels,
+// ChatSessionModels,BookModels}.kt. Mapped when the consuming screen is implemented
+// (per 04-MAPPING-TABLES §4). JSON field names use snake_case as served by backend.
+
+// ─────────────────────────────────────────────────────
+// Connectors
+// ─────────────────────────────────────────────────────
+
+export interface ConnectorSummary {
+  name: string;
+  label: string;
+  type: string;
+  workflow: string;
+  status: string; // "compatible" | "incompatible" | "registered" | "unknown"
+  version: string;
+  description: string;
+  enabled: boolean;
+}
+
+export interface ConnectorListResponse {
+  connectors: ConnectorSummary[];
+}
+
+export interface ConnectorGroupedResponse {
+  audio: ConnectorSummary[];
+  image: ConnectorSummary[];
+  video: ConnectorSummary[];
+  unknown: ConnectorSummary[];
+  audio_active_count: number;
+  image_active_count: number;
+  video_active_count: number;
+}
+
+export interface SubBinding {
+  nodeId?: string | null;
+  label?: string | null;
+  entityType?: string | null;
+  required?: boolean;
+  arrayPosition?: number | null;
+  expectedClass?: string | null;
+  nodeClass?: string | null;
+}
+
+export interface BindingDef {
+  nodeId?: string | null;
+  field?: string | null;
+  label: string;
+  entityType?: string | null;
+  required: boolean;
+  dataType?: string | null;
+  kind?: string | null;
+  defaultValue?: unknown;
+  min?: unknown;
+  max?: unknown;
+  type?: string | null; // "multi" for multi-bindings
+  bindings?: SubBinding[] | null;
+  expectedClass?: string | null;
+  nodeClass?: string | null;
+}
+
+export interface GuideFieldDef {
+  frameIdx?: string | null;
+  strength?: string | null;
+  imageSource?: string | null;
+}
+
+export interface GuideBinding {
+  label: string;
+  nodeId?: string | null;
+  nodeClass?: string | null;
+  fields?: GuideFieldDef | null;
+}
+
+export interface GuideNodes {
+  nodeType: string;
+  bindings: GuideBinding[];
+}
+
+export interface ConnectorDetail {
+  name: string;
+  workflow: string;
+  workflowHash?: string | null;
+  label: string;
+  description: string;
+  type: string;
+  version: string;
+  metadata?: Record<string, unknown> | null;
+  inputs: Record<string, BindingDef>;
+  outputs: Record<string, BindingDef>;
+  parameters: Record<string, BindingDef>;
+  guideNodes?: GuideNodes | null;
+  hasGuideNodes: boolean;
+}
+
+export interface CompatibilityStatus {
+  name?: string;
+  workflow?: string;
+  compatible: boolean;
+  hashMatch?: boolean;
+  nodesChecked?: number;
+  nodesTotal?: number;
+  warnings: string[];
+  errors: string[];
+  workflowHash?: string | null;
+  lastValidated?: string | null;
+}
+
+export interface ConnectorStatusRequest {
+  enabled: boolean;
+}
+export interface ConnectorStatusResponse {
+  ok: boolean;
+  error?: string | null;
+  enabled?: boolean | null;
+}
+
+export interface UpdateBindingRequest {
+  section: string;
+  entityKey: string;
+  nodeId?: string | null;
+  field?: string | null;
+}
+export interface UpdateBindingResponse {
+  ok: boolean;
+  error?: string | null;
+}
+
+export interface UpdateParameterRequest {
+  paramKey: string;
+  value: unknown;
+}
+export interface UpdateParameterResponse {
+  ok: boolean;
+  error?: string | null;
+  previousValue?: unknown;
+  currentValue?: unknown;
+  warnings?: string[] | null;
+}
+
+export interface ConnectorParameterValues {
+  values: Record<string, unknown>;
+}
+
+export interface AddConnectorRequest {
+  name: string;
+  connector: Record<string, unknown>;
+}
+export interface AddConnectorResponse {
+  ok: boolean;
+  error?: string | null;
+  name?: string | null;
+  warnings?: string[] | null;
+  message?: string | null;
+}
+
+export interface ConnectorReloadResult {
+  ok: boolean;
+  connectorsLoaded?: number;
+  warnings?: string[];
+  errors?: string[];
+}
+
+// ─────────────────────────────────────────────────────
+// Workflows
+// ─────────────────────────────────────────────────────
+
+export interface WorkflowDetail {
+  name: string;
+  nodes: number;
+  nodeTypes: Record<string, string>;
+  hash?: string | null;
+  hasConnector: boolean;
+  connectorName?: string | null;
+}
+
+export interface WorkflowHashResponse {
+  name: string;
+  hash?: string | null;
+}
+
+// ─────────────────────────────────────────────────────
+// AI chat
+// ─────────────────────────────────────────────────────
+
+export interface AiMessage {
+  role: string;
+  content: string;
+}
+
+export interface AiChatRequest {
+  messages: AiMessage[];
+  book_id?: string | null;
+  lang?: string | null;
+  mode?: string | null;
+  topic_id?: string | null;
+  scene_id?: string | null;
+  character_id?: string | null;
+  session_id?: string | null;
+}
+
+export interface ToolCallResult {
+  tool: string;
+  result?: string | null;
+  error?: string | null;
+  applied?: number | null;
+  book_id?: string | null;
+}
+
+export interface AiChatResponse {
+  reply: string;
+  book_edited: boolean;
+  book_id?: string | null;
+  session_id?: string | null;
+  tool_results?: ToolCallResult[] | null;
+  patches_applied: number;
+}
+
+export interface ChatSessionApi {
+  id: string;
+  book_id?: string;
+  title: string;
+  mode: string;
+  topic_id: string;
+  message_count: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface SessionListResponse {
+  sessions: ChatSessionApi[];
+}
+
+export interface SessionResponse {
+  session: ChatSessionApi;
+}
+
+export interface CreateSessionRequest {
+  book_id: string;
+  title?: string | null;
+  topic_id?: string | null;
+  mode?: string | null;
+}
+
+export interface SessionMessagesResponse {
+  messages: SessionMessageApi[];
+}
+
+export interface SessionMessageApi {
+  id: number;
+  book_id: string;
+  session_id?: string | null;
+  scene_id?: string | null;
+  role: string;
+  message: string;
+  created_at: number;
+}
+
+// ─────────────────────────────────────────────────────
+// Book — full models for Navigate (stage 5) and Edit (stage 6).
+// 1:1 with BookModels.kt / SceneUnit.kt / CharPassport.kt etc.
+// ─────────────────────────────────────────────────────
+
+export interface BookManifest {
+  book_id?: string | null;
+  build_id?: string | null;
+  vbook_version?: string | null;
+  created_at?: string | null;
+}
+
+export interface BookMeta {
+  title?: string | null;
+  author?: string | null;
+  language?: string | null;
+  book_id?: string | null;
+  defaults?: { narration_voice?: string | null } | null;
+}
+
+export interface BookBible {
+  country?: string | null;
+  epoch?: string | null;
+  render_rules?: { style?: string | null; lighting_default?: string | null } | null;
+  locations?: Record<string, BookLocation> | null;
+}
+
+export interface SceneEnvironment {
+  time?: string | null;
+  season?: string | null;
+  lighting?: string | null;
+  weather?: string | null;
+  mood?: string | null;
+  atmosphere?: string | null;
+  country?: string | null;
+  epoch?: string | null;
+}
+
+export interface SceneLocation {
+  id?: string | null;
+  environment?: SceneEnvironment | null;
+}
+
+export interface SceneAudio {
+  voice?: string | null;
+  full_text?: string | null;
+}
+
+export interface CharPassport {
+  appearance?: string | null;
+  clothes?: string | null;
+  // video_tokens: legacy string OR array of 1-4 short visual features (agent scheme)
+  video_tokens?: string | string[] | null;
+}
+
+export interface UnitAudio {
+  speaker?: string | null;
+  text?: string | null;
+}
+
+export interface UnitImage {
+  shot?: string | null;
+  prompt?: string | null;
+  negative?: string | null;
+}
+
+export interface UnitVideo {
+  action?: string | null;
+}
+
+export interface BookData {
+  manifest?: BookManifest | null;
+  book?: BookMeta | null;
+  bible?: BookBible | null;
+  chapters?: BookChapter[] | null;
+  characters?: BookCharacter[] | null;
+  voices?: Record<string, BookVoiceEntry> | null;
+  locations?: Record<string, BookLocation> | null;
+  /** Server-computed flat scene list (thin-client contract) — preferred over traversal. */
+  scene_list?: { chapter_id?: string | null; scene_id?: string | null; type?: string | null }[] | null;
+}
+
+export interface BookChapter {
+  chapter_id?: string | null;
+  chapter_title?: string | null;
+  type?: string | null;
+  is_special?: boolean;
+  display_number?: number | null;
+  scenes?: BookScene[] | null;
+}
+
+export interface BookScene {
+  scene_id?: string | null;
+  scene_title?: string | null;
+  display_index?: number | null;
+  type?: string | null;
+  style?: string | null;
+  location?: SceneLocation | null;
+  audio?: SceneAudio | null;
+  participants?: string[] | null;
+  /** Per-scene character passport overrides (scene.passport map). */
+  passport?: Record<string, CharPassport> | null;
+  units?: BookUnit[] | null;
+}
+
+// SceneUnit.kt equivalent (Navigate tree leaf + Edit fields)
+export interface BookUnit {
+  id?: string | null;
+  type?: string | null;
+  text?: string | null;
+  participants?: string[] | null;
+  audio?: UnitAudio | null;
+  image?: UnitImage | null;
+  video?: UnitVideo | null;
+}
+
+export interface BookCharacter {
+  id?: string | null;
+  name?: string | null;
+  passport?: CharPassport | null;
+}
+
+export interface BookVoiceEntry {
+  instruction?: string | null;
+}
+
+export interface BookLocationEnvironment {
+  time?: string | null;
+  season?: string | null;
+  lighting?: string | null;
+  weather?: string | null;
+  mood?: string | null;
+  atmosphere?: string | null;
+}
+
+export interface BookLocation {
+  name?: string | null;
+  description?: string | null;
+  environment?: BookLocationEnvironment | null;
+}
+
+// ─────────────────────────────────────────────────────
+// Book import / export (File screen, stage 3)
+// ─────────────────────────────────────────────────────
+
+export interface ImportResponse {
+  format: 'vbook' | 'txt';
+  book_id: string;
+  build_id?: string | null;
+  title?: string | null;
+  state?: string | null;
+  chapter_count?: number;
+  scene_count?: number;
+  was_existing?: boolean;
+  dedup?: boolean;
+}
+
+export interface AssetsStateResponse {
+  book_id?: string | null;
+  scope?: string | null;
+  total_chunks?: number;
+  audio_ready?: number;
+  image_ready?: number;
+  video_ready?: number;
+  has_audio?: boolean;
+  has_image?: boolean;
+  has_video?: boolean;
+  all_audio_ready?: boolean;
+  all_image_ready?: boolean;
+  all_video_ready?: boolean;
+  has_assets?: boolean;
+  scope_total?: number;
+  scope_audio_ready?: number;
+  scope_audio_ready_real?: number;
+  scope_image_ready?: number;
+  scope_video_ready?: number;
+  scope_all_audio_ready?: boolean;
+}
+
+// Flat scene list in book order — port of BookData.sceneRefs() (BookModels.kt):
+// prefers the server-computed scene_list, falls back to chapter→scene traversal
+// (scene type comes from the scene itself, like the Android fallback).
+export interface SceneRef {
+  chapterId: string;
+  sceneId: string;
+  sceneType?: string;
+}
+
+export function sceneRefs(book: BookData): SceneRef[] {
+  const flat = book.scene_list;
+  if (flat && flat.length) {
+    return flat.map((f) => ({
+      chapterId: f.chapter_id ?? '',
+      sceneId: f.scene_id ?? '',
+      sceneType: f.type ?? undefined,
+    }));
+  }
+  const out: SceneRef[] = [];
+  for (const ch of book.chapters ?? []) {
+    for (const sc of ch.scenes ?? []) {
+      out.push({ chapterId: ch.chapter_id ?? '', sceneId: sc.scene_id ?? '', sceneType: sc.type ?? undefined });
+    }
+  }
+  return out;
+}
+
+
+// unitIndex() equivalent — Android returns unitOffset+1 when the scene exists.
+export function unitIndex(book: BookData | null, chapterId: string | null, sceneId: string | null, unitOffset: number): number {
+  if (!book || !chapterId || !sceneId) return 0;
+  for (const ch of book.chapters ?? []) {
+    if (ch.chapter_id === chapterId) {
+      for (const sc of ch.scenes ?? []) {
+        if (sc.scene_id === sceneId) return unitOffset + 1;
+      }
+    }
+  }
+  return 0;
+}
+
+// ─────────────────────────────────────────────────────
+// Generate screen (stage 4) — worker counts / progress panel /
+// agent status / layer config / regenerate
+// ─────────────────────────────────────────────────────
+
+// GET /worker/counts — WorkerCounts.kt
+export interface WorkerCounts {
+  audio: number;
+  image: number;
+  video: number;
+  vbook: number;
+  active_audio: number;
+  active_image: number;
+  active_video: number;
+  active_vbook: number;
+  active_scenes: number;
+}
+
+// GET /book/{id}/progress-panel — ProgressPanelResponse/ProgressTask
+export interface ProgressPanelResponse {
+  book_id?: string | null;
+  tasks: ProgressTask[];
+  overall_percent: number;
+  any_incomplete: boolean;
+}
+
+export interface ProgressTask {
+  task_id?: string | null;
+  type: string;
+  scope: string;
+  chapter_id?: string | null;
+  scene_id?: string | null;
+  scene_label?: string | null;
+  chapter_label?: string | null;
+  end_scene_label?: string | null;
+  end_chapter_label?: string | null;
+  target_count: number;
+  started_at?: number | null;
+  ready: number;
+  total: number;
+  percent: number;
+  done: boolean;
+  visible: boolean;
+  indeterminate: boolean;
+  cancelled: boolean;
+}
+
+// GET /book/{id}/agent-status — AgentStatusResponse
+export interface AgentStatusResponse {
+  active: boolean;
+  session_id?: string | null;
+  session_status?: string | null;
+  progress_msg?: string | null;
+  source_type?: string | null;
+  window_index?: number | null;
+  created_scenes?: number | null;
+  total_scenes?: number | null;
+  remaining_cached?: number | null;
+  window_size?: number | null;
+  window_start_scene?: number | null;
+  window_total_scenes?: number | null;
+  window_scene_index?: number | null;
+  step_type?: string | null;
+}
+
+// GET/PUT /book/{id}/layer-config — LayerConfigResponse / LayerConfigUpdate
+export interface LayerConfigResponse {
+  book_id?: string | null;
+  audio_enabled: boolean;
+  image_enabled: boolean;
+  video_enabled: boolean;
+  vbook_enabled: boolean;
+  chunk_size: number;
+  audio_timeout_minutes?: number | null;
+  image_timeout_minutes?: number | null;
+  video_timeout_minutes?: number | null;
+}
+
+export interface LayerConfigUpdate {
+  audio_enabled?: boolean | null;
+  image_enabled?: boolean | null;
+  video_enabled?: boolean | null;
+  vbook_enabled?: boolean | null;
+  chunk_size?: number | null;
+  audio_timeout_minutes?: number | null;
+  image_timeout_minutes?: number | null;
+  video_timeout_minutes?: number | null;
+}
+
+// GET /book/{id}/status — BookStatus (lazy book; served camelCase by backend)
+export interface BookStatus {
+  bookId?: string | null;
+  state?: string | null;
+  source?: string | null;
+  title?: string | null;
+  author?: string | null;
+  language?: string | null;
+  hasSource?: boolean;
+  hasCharacters?: boolean;
+  hasBible?: boolean;
+  totalChapters?: number;
+  parsedChapters?: number;
+  totalScenes?: number;
+  parsedScenes?: number;
+  characterCount?: number;
+  locationCount?: number;
+  sourceSize?: number;
+  updatedAt?: string | null;
+  ready?: boolean;
+}
+
+// GET /api/v1/books — RecentBook / RecentBooksResponse (session restore across clients)
+export interface RecentBook {
+  book_id: string;
+  build_id?: string | null;
+  title?: string | null;
+  state?: string | null;
+  source_type?: string | null;
+  file_hash?: string | null;
+  updated_at?: number;
+  parsed_chapters?: number;
+  total_scenes?: number;
+}
+
+export interface RecentBooksResponse {
+  books: RecentBook[];
+}
+
+// POST /book/{id}/regenerate — RegenerateRequest / RegenerateResponse
+export interface RegenerateRequest {
+  new_book?: BookData | null;
+  rebuild_all?: boolean;
+  worker_types?: string[] | null;
+  scope?: string | null;
+  chapter_id?: string | null;
+  scene_id?: string | null;
+}
+
+export interface RegenerateResponse {
+  book_id?: string | null;
+  build_id?: string | null;
+  message?: string | null;
+  dirty_scenes?: { chapter_id?: string; scene_id?: string; reason?: string; dirty_layers?: string[] }[] | null;
+  /** Server-computed book diff (DiffSummary.kt) — feeds the Edit dirty indicator. */
+  summary?: DiffSummary | null;
+  marked?: number;
+  scope?: string | null;
+  tasks?: { task_id: string; type: string; target_count: number }[];
+}
+
+// DiffSummary.kt — counts reported after a regenerate/import (book diff).
+export interface DiffSummary {
+  total_scenes_old?: number;
+  total_scenes_new?: number;
+  changed?: number;
+  added?: number;
+  removed?: number;
+}
+
+// POST /book/{id}/cancel-worker — CancelWorkerRequest
+export interface CancelWorkerRequest {
+  type?: string | null;
+  task_id?: string | null;
+}
+
+// SSE /book/{id}/progress-stream — ProgressEvent (ProgressStream.kt)
+export interface ProgressEvent {
+  type?: string;
+  layer?: string;
+  chapterId?: string | null;
+  sceneId?: string | null;
+  ready?: number | null;
+  // VBook fields (type == "vbook")
+  stage?: string | null;
+  scene_index?: number | null;
+  total_scenes?: number | null;
+  window_size?: number | null;
+  window_scene_index?: number | null;
+  window_total_scenes?: number | null;
+  window_start_scene?: number | null;
+  message?: string | null;
+}
+
+// ─────────────────────────────────────────────────────
+// Edit screen (stage 6) — scene timeline + waveform
+// 1:1 with TimelineModels.kt
+// ─────────────────────────────────────────────────────
+
+// GET /scene/{b}/{ch}/{sc}/waveform — WaveformData/WaveformPeak
+export interface WaveformPeak {
+  pos: number;
+  neg: number;
+}
+
+export interface WaveformData {
+  peaks: WaveformPeak[];
+  duration_sec: number;
+  peak_count: number;
+}
+
+// GET /scene/{b}/{ch}/{sc}/timings — SceneTiming/IuTimingBoundary
+export interface IuTimingBoundary {
+  unit_id: string;
+  scene_order: number;
+  start_ms: number | null;
+  end_ms: number | null;
+  estimated_duration_sec?: number;
+  text_proportion?: number;
+}
+
+export interface SceneTiming {
+  units: IuTimingBoundary[];
+  total_duration_ms: number;
+}
+
+// PUT /scene/{b}/{ch}/{sc}/timings — TimingsUpdateRequest/Response
+export interface TimingBoundary {
+  unit_id: string;
+  start_ms: number;
+  end_ms: number;
+}
+
+export interface TimingsUpdateRequest {
+  build_id: string;
+  units: TimingBoundary[];
+}
+
+export interface TimingsUpdateResponse {
+  units: TimingBoundary[];
+  recalculated: boolean;
+}
+
+// ─────────────────────────────────────────────────────
+// Play screen (stage 7) — scene status + storyboard
+// 1:1 with LayerConfig.kt (SceneStatusResponse) and StoryboardResponse.kt
+// ─────────────────────────────────────────────────────
+
+// GET /scene/{b}/{ch}/{sc}/status — SceneStatusResponse
+export interface SceneStatusResponse {
+  book_id?: string | null;
+  chapter_id?: string | null;
+  scene_id?: string | null;
+  build_id?: string | null;
+  scene_type?: string | null;
+  audio_ready: boolean;
+  video_ready: boolean;
+  image_ready: boolean;
+}
+
+// GET /scene/{b}/{ch}/{sc}/storyboard — StoryboardResponse/IuItem
+export interface StoryboardResponse {
+  chunk_id: string;
+  book_id?: string | null;
+  chapter_id?: string | null;
+  scene_id?: string | null;
+  build_id: string;
+  scene_type?: string | null;
+  ius: StoryboardIu[];
+}
+
+export interface StoryboardIu {
+  unit_id: string;
+  scene_id?: string | null;
+  text?: string | null;
+  text_proportion?: number | null;
+  estimated_duration_sec?: number | null;
+  audio_file?: string | null;
+  start_ms?: number | null;
+  end_ms?: number | null;
+  /** Server-computed playback duration (interval → estimate → default); the
+   *  client never re-derives it (N1). */
+  duration_ms?: number | null;
+}
+
+/**
+ * GET /api/v1/config — backend-served editor limits. Served from the backend so
+ * the editor enforces the SAME value the server validates on save; if it later
+ * becomes a user setting, the endpoint reads it from a settings store and this
+ * model stays unchanged.
+ */
+export interface AppConfig {
+  limits?: {
+    /** Max chars for a frame prompt (image.prompt / video.action). */
+    image_prompt_max_chars?: number;
+  };
+}

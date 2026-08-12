@@ -1,0 +1,34 @@
+/* Light "cozy cinema hall" theme (Theme.Animastor.CinemaLight) */
+[data-theme="light"] {
+  --bg: #F0EBE0;
+  --surface: #FAF7F0;
+  --surface-2: #F0E9DE;
+  --surface-dim: #E6DFD3;
+  --text: #2C2418;
+  --text-2: #6B6258;
+  --text-disabled: #A89F94;
+  --primary-container: #F5E0E2;
+  --accent-container: #F5EDD6;
+  --on-accent-container: #A6833E; /* colorOnSecondaryContainer = cinema_accent_dim */
+  --error-container: #FCE4E7;
+  --outline: #CEC5B8;
+  --outline-2: #E2DACD;
+  --scrim: rgba(160,152,128,0.5);
+  --missing-bg: rgba(230,223,211,0.8);
+  --subtitle-bg: rgba(0,0,0,0.73);
+  --worker-panel-on: #E3DACB;
+  --worker-panel-off: #F2EDE3;
+  /* Worker panel labels — same principle as dark: ON = #6B6258
+     (cinema_light_text_secondary — readable secondary), OFF = #8E867A (muted,
+     luminance midpoint to disabled #A89F94). Same hexes as
+     cinema_light_worker_label_on/off in Android colors.xml. */
+  --worker-label-on: #6B6258;
+  --worker-label-off: #8E867A;
+  --posbar-gradient: linear-gradient(180deg, #F5F0E6, #E7DED0);
+  /* Scene/unit panels in the Navigate TOC — light theme keeps the card tone
+     slightly above the page (#F0EBE0); the hairline border does the separation. */
+  --nav-scene-bg: #F4EFE5;
+  --nav-unit-bg: #FAF7F0;
+
+  --theme-color: #E6DFD3;
+}

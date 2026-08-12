@@ -1,0 +1,2615 @@
+* { box-sizing: border-box; }
+html, body, #app { height: 100%; margin: 0; }
+body {
+  font-family: var(--font-base);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Android-parity vertical scrollbar ─────────────────────────────
+   Thumb = colorAccent (#C9A15A), track = colorOutlineVariant
+   (#2D2925 dark / #E2DACD light), 5dp wide, 3dp radius — mirrors
+   res/drawable/scrollbar_thumb.xml + scrollbar_track.xml with
+   fadeScrollbars=false. Only applies to overflowing content because
+   every scrollable area uses overflow-y: auto. Horizontal-only strips
+   that hide their scrollbar keep it via their own display:none rules
+   (higher specificity). */
+/* Vertical only (the task targets vertical scrollbars; horizontal areas like
+   dev-json / tables keep their native look). Orientation pseudo-classes are
+   WebKit-only, so Firefox stays global via scrollbar-* properties. */
+*::-webkit-scrollbar:vertical { width: 5px; }
+*::-webkit-scrollbar-track:vertical {
+  background: var(--outline-2);
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:vertical {
+  background: var(--accent);
+  border-radius: 3px;
+}
+/* Firefox parity (thin ≈ 5-8px, accent thumb on outline-variant track) */
+* { scrollbar-width: thin; scrollbar-color: var(--accent) var(--outline-2); }
+
+/* Touch devices (phones / tablets / touch laptops): the native scrollbar is an
+   overlay that fades right after scrolling stops, and CSS scrollbar styling is
+   ignored — so hide it and let lib/scrollbar.ts paint a persistent
+   Android-style indicator (fixed overlay, visible only while overflowing). */
+@media (pointer: coarse) {
+  *::-webkit-scrollbar:vertical { width: 0; }
+  *::-webkit-scrollbar:horizontal { height: 0; }
+  * { scrollbar-width: none; }
+}
+
+/* JS-drawn persistent scroll indicator (see lib/scrollbar.ts) — a fixed,
+   pointer-transparent overlay at each scroll container's right edge. Track =
+   colorOutlineVariant (--outline-2), thumb = colorSecondary/cinema_accent
+   (--accent), 5px wide, 3px radius; opacity is toggled by the module and it is
+   never shown when the content fits. z-index 140 sits above modal content
+   (backdrops 100 / popups 90) so indicators show inside dialogs too, while
+   staying below full-screen overlays (zoom 150, toasts 200). */
+.vs-ind {
+  position: fixed;
+  top: 0; left: 0;
+  width: 5px;
+  background: var(--outline-2);
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 140;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.vs-thumb {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  background: var(--accent);
+  border-radius: 3px;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+}
+
+.app-shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.app-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+
+/* ── Desktop workspace shell ────────────────────────────────────
+   Kept behind the same breakpoint in AppShell. The first prototype deliberately
+   reuses the existing File/Navigate pages and central route content; desktop
+   refinements (collapsible rails, editor workspace and responsive priorities)
+   are separate small steps. */
+.desktop-shell { background: var(--bg); position: relative; }
+.toolbar__ai-chip--active { background: var(--surface-2); }
+/* Assistant dock — contextual overlay panel (plan §8): docked right, below the
+   header, above the workspace but below global modal priority (z 60 < 100). */
+.assistant-dock {
+  position: absolute;
+  top: 4rem;
+  right: 0;
+  bottom: 0;
+  width: min(26rem, 100%);
+  z-index: 60;
+  display: flex;
+  background: var(--surface);
+  border-left: 1px solid var(--outline-2);
+  box-shadow: var(--elev-3);
+  animation: assistant-dock-in 0.18s ease;
+}
+.assistant-dock > .ai-page { flex: 1; min-height: 0; }
+@keyframes assistant-dock-in {
+  from { transform: translateX(16px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+/* Desktop containment for secondary routes (plan §4.4): compact back bar above
+   the full-height central page, all inside the shell — no mobile toolbar. */
+.desktop-secondary {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.desktop-secondary-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 3rem;
+  padding: 0 0.75rem;
+  border-bottom: 1px solid var(--outline-2);
+  background: var(--surface);
+}
+.desktop-secondary-bar__title {
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.desktop-secondary > .page { flex: 1; min-height: 0; }
+/* Settings keeps its pinned-footer scroll model inside the shell too (its outer
+   .page must not double-scroll next to .settings-page__scroll). */
+.desktop-main .settings-page { overflow: hidden; }
+.desktop-header {
+  min-height: 4rem;
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) auto minmax(10rem, 1fr);
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--outline-2);
+}
+.desktop-header__brand {
+  color: var(--accent);
+  font-size: 1.125rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+.desktop-header__identity {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.desktop-book-context {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+.desktop-book-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.desktop-position {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+.desktop-header__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+}
+.desktop-generation-status {
+  position: relative;
+  width: 2.5rem;
+  height: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.desktop-generation-status:hover { background: var(--surface-2); color: var(--text); }
+.desktop-generation-status__dot {
+  position: absolute;
+  top: 0.375rem;
+  right: 0.375rem;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border: 1px solid var(--surface);
+  border-radius: 50%;
+  background: var(--text-disabled);
+}
+.desktop-generation-status--running { color: var(--accent); }
+.desktop-generation-status--running .desktop-generation-status__dot { background: var(--accent); animation: desktop-status-pulse 1.6s infinite ease-in-out; }
+.desktop-generation-status--error { color: var(--error); }
+.desktop-generation-status--error .desktop-generation-status__dot { background: var(--error); }
+.desktop-generation-status--success { color: var(--success); }
+.desktop-generation-status--success .desktop-generation-status__dot { background: var(--success); }
+@keyframes desktop-status-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.72); }
+}
+/* Nonessential desktop animations respect prefers-reduced-motion (plan §11):
+   the dock slide, status pulses and every colour transition inside the shell
+   collapse to near-instant, keeping state changes readable without motion. */
+@media (prefers-reduced-motion: reduce) {
+  .assistant-dock { animation: none; }
+  .desktop-generation-status--running .desktop-generation-status__dot,
+  .desktop-main .gen-desk-bar__summary--active { animation: none; }
+  .desktop-shell *,
+  .desktop-shell *::before,
+  .desktop-shell *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+.desktop-modes {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid var(--outline-2);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+}
+.desktop-modes__item {
+  min-height: 2.5rem; /* 40px — plan §11 primary action target */
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border: 0;
+  border-radius: var(--radius-pill);
+  padding: 0 0.875rem;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.desktop-modes__item:hover { background: var(--surface); }
+.desktop-modes__item:focus-visible { outline-offset: 3px; }
+.desktop-modes__item--active { background: var(--primary); color: var(--on-primary); }
+.desktop-layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(14rem, 15.5rem) minmax(0, 1fr) minmax(15rem, 17.5rem);
+  gap: 0.75rem;
+  padding: 0.75rem;
+  overflow: hidden;
+}
+.desktop-panel {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--outline-2);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elev-1);
+}
+.desktop-panel__title {
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.875rem;
+  border-bottom: 1px solid var(--outline-2);
+  color: var(--accent);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+.desktop-panel__title-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-panel__collapse {
+  width: 2rem;
+  height: 2rem;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.desktop-panel__collapse:hover { background: var(--surface-2); color: var(--text); }
+.desktop-panel > .page {
+  min-height: 0;
+  padding: 0.75rem;
+}
+.desktop-panel--file .file-card { padding: 0.875rem; gap: 0.75rem; }
+.desktop-panel--file .file-page__bar,
+.desktop-panel--file .file-page__status { margin-left: 0.5rem; margin-right: 0.5rem; }
+.desktop-panel--navigator .nav-page { padding: 0.5rem; }
+.desktop-main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--outline-2);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elev-1);
+}
+.desktop-main > .page { min-width: 0; }
+.desktop-start-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 2rem;
+  color: var(--accent);
+  text-align: center;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.desktop-start-state small { color: var(--text-2); font-size: 0.8125rem; font-weight: 400; max-width: 28rem; line-height: 1.45; }
+.desktop-start-state__title { color: var(--text); font-size: 1.125rem; font-weight: 600; }
+.desktop-start-state__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 0.875rem;
+}
+.desktop-start-state__btn { height: 2.5rem; font-size: 0.875rem; transition: background-color 0.15s ease; }
+.desktop-start-state__btn:hover { background: var(--primary-pressed); }
+.desktop-start-state__btn.btn--outlined:hover { background: var(--surface-2); }
+
+/* File is manually collapsible. Its content stays mounted so an export/import
+   status is not discarded; display:none also removes hidden controls from tab
+   order. No automatic behaviour changes this user-selected state. */
+.desktop-layout--file-collapsed { grid-template-columns: 3.75rem minmax(0, 1fr) minmax(15rem, 17.5rem); }
+.desktop-panel--file.desktop-panel--collapsed .desktop-panel__title { justify-content: center; padding: 0; }
+.desktop-panel--file.desktop-panel--collapsed .desktop-panel__title-label,
+.desktop-panel--file.desktop-panel--collapsed > .page { display: none; }
+.desktop-panel--file.desktop-panel--collapsed .desktop-panel__collapse { margin-left: 0; }
+.desktop-layout--navigator-collapsed { grid-template-columns: minmax(14rem, 15.5rem) minmax(0, 1fr) 3.75rem; }
+.desktop-layout--file-collapsed.desktop-layout--navigator-collapsed { grid-template-columns: 3.75rem minmax(0, 1fr) 3.75rem; }
+.desktop-panel--navigator.desktop-panel--collapsed .desktop-panel__title { justify-content: center; padding: 0; }
+.desktop-panel--navigator.desktop-panel--collapsed .desktop-panel__title-label,
+.desktop-panel--navigator.desktop-panel--collapsed > .page { display: none; }
+.desktop-panel--navigator.desktop-panel--collapsed .desktop-panel__collapse { margin-left: 0; }
+
+/* Laptop desktop: keep both panels usable, but give the central workspace the
+   extra width needed by the upcoming Editor preview and prompt inspector.
+   This is a density adjustment, not an automatic collapse; rail state remains
+   entirely under the user's control. */
+@media (max-width: 1359px) {
+  .desktop-header { grid-template-columns: minmax(8rem, 1fr) auto minmax(8rem, 1fr); gap: 0.5rem; }
+  .desktop-modes__item { padding: 0 0.6875rem; }
+  .desktop-layout {
+    grid-template-columns: minmax(11.5rem, 12.5rem) minmax(0, 1fr) minmax(12.5rem, 14rem);
+    gap: 0.5rem;
+    padding: 0.5rem;
+  }
+  .desktop-layout--file-collapsed { grid-template-columns: 3.75rem minmax(0, 1fr) minmax(12.5rem, 14rem); }
+  .desktop-layout--navigator-collapsed { grid-template-columns: minmax(11.5rem, 12.5rem) minmax(0, 1fr) 3.75rem; }
+  .desktop-layout--file-collapsed.desktop-layout--navigator-collapsed { grid-template-columns: 3.75rem minmax(0, 1fr) 3.75rem; }
+}
+
+/* ── Desktop Editor workspace (Phase 5) ─────────────────────────
+   Only inside .desktop-main (i.e. >= 1180px). The EditPage keeps its mobile
+   composition and all its state; at desktop width it becomes a two-column
+   workspace: preview column (unit carousel + waveform timeline) on the left,
+   editing inspector (tabs + fields + save) on the right. Panels stay mounted
+   so drafts and media survive mode switches. */
+.desktop-main .edit-page {
+  display: grid;
+  grid-template-columns: minmax(20rem, 44%) minmax(0, 1fr);
+  grid-template-areas:
+    "header   header"
+    "carousel tabs"
+    "timeline content"
+    "dirty    dirty"
+    "error    error"
+    "empty    empty";
+  gap: 0.625rem;
+  padding: 0.75rem;
+  overflow-y: auto;
+  align-content: start;
+}
+/* Desktop editor header — breadcrumb left, unit count, prev/next, save state,
+   persistent Save (plan §5.1/§5.2). Text + colour for the state, never colour
+   alone; the mobile position bar is superseded on desktop. */
+.desktop-main .edit-header {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.625rem;
+  background: var(--nav-scene-bg);
+  border: 1px solid var(--outline-2);
+  border-radius: var(--radius-sm);
+}
+.desktop-main .edit-header__pos {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.desktop-main .edit-header__units {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.desktop-main .edit-header__nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+.desktop-main .edit-header__nav-btn {
+  width: 2.375rem;
+  height: 2.375rem; /* 38px — frequent editor navigation */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.desktop-main .edit-header__nav-btn:hover { background: var(--surface-2); }
+.desktop-main .edit-header__nav-btn:disabled { opacity: 0.4; cursor: default; }
+.desktop-main .edit-header__state {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  border: 1px solid var(--outline-2);
+}
+.desktop-main .edit-header__state--saved { color: var(--success); }
+.desktop-main .edit-header__state--dirty { color: var(--accent); }
+.desktop-main .edit-header__state--busy { color: var(--text-2); }
+.desktop-main .edit-header__save {
+  flex-shrink: 0;
+  height: 2.5rem; /* 40px — plan §11 primary action target */
+  padding: 0 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border: 0;
+  border-radius: 1rem;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.desktop-main .edit-header__save:hover { background: var(--primary-pressed); }
+.desktop-main .edit-header__save:disabled { opacity: 0.5; cursor: default; }
+/* The mobile position bar is not needed in the desktop shell: the header
+   breadcrumb above serves the same purpose. */
+.desktop-main .edit-posbar { display: none; }
+/* Draft-protection modal description text */
+.edit-confirm__desc {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+/* ── Desktop preview stage + unit rail (plan §5.3) ── */
+.edit-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+/* Stable bounded canvas — object-fit: contain keeps portrait/landscape images
+   inside the same box without collapsing or reshaping the surrounding layout. */
+.edit-stage__canvas {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--surface-dim);
+  border: 1px solid var(--outline-2);
+  border-radius: var(--radius-sm);
+  position: relative;
+}
+.edit-stage__zoom {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 14rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: zoom-in;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.edit-stage__img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+}
+.edit-stage__missing {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  padding: 2rem;
+}
+/* Subtle zoom affordance, shown on hover/focus (supplements the click, never
+   replaces the visible state). */
+.edit-stage__zoom-hint {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  opacity: 0;
+  transition: opacity .15s ease;
+  pointer-events: none;
+}
+.edit-stage__zoom:hover .edit-stage__zoom-hint,
+.edit-stage__zoom:focus-visible .edit-stage__zoom-hint { opacity: 1; }
+/* Horizontally scrollable rail of the current scene's units */
+.edit-stage__rail {
+  display: flex;
+  gap: 0.375rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 0.125rem 0.125rem 0.25rem;
+}
+.edit-stage__rail::-webkit-scrollbar { display: none; }
+.edit-stage__empty {
+  flex: 1;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 0.75rem;
+  padding: 0.75rem 0.25rem;
+}
+.edit-stage__thumb {
+  position: relative;
+  width: 3.5rem;
+  height: 3.5rem;
+  flex-shrink: 0;
+  border: 2px solid var(--outline-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  overflow: hidden;
+  padding: 0;
+  cursor: pointer;
+}
+.edit-stage__thumb:hover { border-color: var(--outline); }
+.edit-stage__thumb--active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.edit-stage__thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.edit-stage__thumb-missing {
+  width: 100%;
+  height: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+}
+.edit-stage__thumb-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-size: 0.625rem;
+  font-weight: 500;
+  padding: 1px 0;
+  pointer-events: none;
+}
+/* Desktop hides the mobile carousel panel chrome inside the preview column. */
+.desktop-main .edit-panel--carousel .edit-panel__strip,
+.desktop-main .edit-panel--carousel .edit-panel__collapse { display: none; }
+.desktop-main .edit-panel--carousel { grid-area: carousel; align-self: start; }
+/* The waveform column stretches below the carousel, mirroring the plan's
+   preview-column composition (waveform directly under the preview). */
+.desktop-main .edit-panel--timeline { grid-area: timeline; align-self: stretch; }
+.desktop-main .edit-tabs { grid-area: tabs; align-self: start; }
+.desktop-main .edit-content { grid-area: content; min-height: 0; }
+/* Mobile bottom Save is superseded by the persistent header Save on desktop
+   (plan §5.1/§5.2) — one explicit save action per composition. */
+.desktop-main .edit-bottom { display: none; }
+.desktop-main .edit-dirty { grid-area: dirty; }
+.desktop-main .edit-error { grid-area: error; }
+.desktop-main .edit-empty { grid-area: empty; }
+
+/* Prompt editors (image.prompt / video.action) get durable room on desktop: full
+   inspector width, taller initial height, vertical resize, preserved line breaks. */
+.desktop-main .edit-field--prompt {
+  padding: 0.625rem;
+}
+.desktop-main .edit-field--prompt .edit-field__input--area {
+  min-height: 12.5rem; /* 200px — plan §5.4 180–260px initial range */
+  resize: vertical;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* Wide desktop: give the preview column more room, cap it at 50%. */
+@media (min-width: 1440px) {
+  .desktop-main .edit-page {
+    grid-template-columns: minmax(22rem, 46%) minmax(0, 1fr);
+  }
+}
+
+/* Laptop desktop: the editor inspector must stay usable — when the workspace is
+   tight, the Navigator panel collapses to a rail first (user-controlled), and
+   the editor keeps a two-column split with safe minimums. */
+@media (max-width: 1359px) {
+  .desktop-main .edit-page {
+    grid-template-columns: minmax(17rem, 40%) minmax(0, 1fr);
+  }
+  .desktop-main .edit-field--prompt .edit-field__input--area {
+    min-height: 10rem;
+  }
+}
+
+/* ── Desktop Generator control room (Phase 6, plan §6) ─────────
+   Only inside .desktop-main (i.e. >= 1180px). GeneratePage keeps its mobile
+   composition and all its state (polling, scope dialog, cancellation); at
+   desktop width the page becomes a responsive grid: a header row with the
+   current position, a compact active-jobs summary and the global Generate /
+   Stop actions, then the four worker cards — two columns at wide desktop,
+   one readable column on laptop. The mobile position bar and the Global
+   section card are superseded by the header row on desktop. */
+.desktop-main .gen-page {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-content: start;
+  padding: 0.75rem;
+}
+.desktop-main .gen-posbar { display: none; }
+.desktop-main .gen-card--global { display: none; }
+.desktop-main .gen-desk-bar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.625rem;
+  background: var(--nav-scene-bg);
+  border: 1px solid var(--outline-2);
+  border-radius: var(--radius-sm);
+}
+.desktop-main .gen-desk-bar__pos {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+/* Compact active-jobs summary — text + colour, never colour alone (plan §2.4,
+   §6: running work must stay glanceable above a long task list). */
+.desktop-main .gen-desk-bar__summary {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  border: 1px solid var(--outline-2);
+  color: var(--text-2);
+}
+.desktop-main .gen-desk-bar__summary--active {
+  color: var(--accent);
+  border-color: var(--accent);
+  animation: desktop-status-pulse 1.6s infinite ease-in-out;
+}
+.desktop-main .gen-desk-bar__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.desktop-main .gen-desk-bar__actions .btn {
+  height: 2.5rem; /* 40px — plan §11 primary action target */
+  font-size: 0.875rem;
+  padding: 0 0.875rem;
+  transition: background-color 0.15s ease;
+}
+
+/* Standard/narrow desktop: one readable column instead of squeezing four
+   worker cards (plan §6) — cards stretch full width below the wide grid. */
+@media (max-width: 1359px) {
+  .desktop-main .gen-page { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── Desktop Player transport console (Phase 7, plan §7) ──────────
+   Only inside .desktop-main. page--play is already overflow:hidden with
+   .play-media flex:1, so the stage naturally takes the majority of the
+   workspace; the mobile layerbar/meta/big-button below it are replaced by a
+   desktop transport bar: primary play/pause, status + progress and layer
+   toggles with icon AND visible label (plan §7 — never colour alone).
+   Fullscreen stays anchored to the stage (no duplicated control). Mobile
+   composition below the breakpoint is untouched. */
+.desktop-main .play-layerbar,
+.desktop-main .play-meta,
+.desktop-main .play-btn { display: none; }
+.desktop-main .play-console {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.625rem 1rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--surface);
+  border-top: 1px solid var(--outline-2);
+}
+.desktop-main .play-console__transport {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.desktop-main .play-console__play {
+  flex-shrink: 0;
+  height: 2.5rem; /* 40px — plan §11 primary action target */
+  padding: 0 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border: 0;
+  border-radius: 1rem;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.desktop-main .play-console__play:hover { background: var(--primary-pressed); }
+.desktop-main .play-console__play:disabled { opacity: 0.4; cursor: default; }
+/* Status + indeterminate progress — column layout; the progress keeps its
+   4px height (base rule's flex:1 would grow it vertically in a column). */
+.desktop-main .play-console__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 8rem;
+}
+.desktop-main .play-console__meta .play-progress { flex: 0 0 auto; width: 100%; }
+.desktop-main .play-console__meta .play-status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.desktop-main .play-console__layers {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.desktop-main .play-console__layer {
+  height: 2.5rem; /* 40px — frequent layer toggles */
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0 0.75rem;
+  max-width: 100%;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--outline-2);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+}
+.desktop-main .play-console__layer:hover { background: var(--surface-2); color: var(--text); }
+.desktop-main .play-console__layer > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.desktop-main .play-console__layer--on {
+  background: var(--accent-container);
+  border-color: var(--accent);
+  color: var(--on-accent-container);
+}
+
+/* Laptop desktop: the full console row (play + status + 4 RU-labelled pills)
+   is ~760px — tighter pill density keeps it inside the workspace when both
+   side panels are open at the 1180px edge (plan §7: controls below the stage). */
+@media (max-width: 1359px) {
+  .desktop-main .play-console__layer {
+    padding: 0 0.5rem;
+    font-size: 0.75rem;
+  }
+}
+
+/* Toolbar */
+.toolbar {
+  height: var(--toolbar-h);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.75rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--outline-2);
+  z-index: 5;
+}
+.toolbar__title {
+  /* Android activity_main.xml logo TextView (NOT the default Toolbar title):
+     textColor = ?attr/colorSecondary → cinema_accent (--accent, GOLD),
+     textSize 20sp, letterSpacing 0.08, fontFamily sans-serif-medium (500),
+     textStyle normal. */
+  color: var(--accent);     /* colorSecondary → gold #C9A15A */
+  font-weight: 500;         /* sans-serif-medium */
+  font-size: 1.25rem;       /* 20sp */
+  letter-spacing: 0.08em;   /* Android letterSpacing 0.08 (em units) */
+  line-height: 1.5rem;      /* ~24px = 20sp × 1.2 default Android line height */
+  flex: 1;
+  min-width: 0; /* allow the flex item to shrink so ellipsis actually kicks in */
+  overflow: hidden;
+  text-overflow: ellipsis; /* Android Toolbar ellipsizes long titles */
+  white-space: nowrap;
+}
+/* Secondary screens (back arrow + screen title): Android fragment toolbars use
+   app:titleTextColor="?attr/colorOnSurface" (NOT gold) — so override the gold
+   logo color back to --text, and keep the compact pre-migration look (16px/600). */
+.toolbar__title--secondary {
+  color: var(--text); /* colorOnSurface — fragment toolbars are not gold */
+  font-size: 1rem; /* 16px */
+  font-weight: 600;
+  line-height: 1.25rem;
+  letter-spacing: normal;
+}
+.toolbar__btn {
+  background: transparent; border: 0; color: var(--text-2);
+  width: 2.5rem; height: 2.5rem; border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.toolbar__btn:active { background: var(--primary-container); }
+
+/* AI chip — mirrors activity_main.xml toolbarAiButton (MaterialCardView):
+   48x40dp, cornerRadius 10dp, background colorSurface, stroke colorOutline 1dp,
+   bold 14sp text in colorSecondary (accent). */
+.toolbar__ai-chip {
+  width: 3rem;          /* 48dp */
+  height: 2.5rem;       /* 40dp */
+  border: 1px solid var(--outline);
+  border-radius: 0.625rem; /* 10dp */
+  background: var(--surface);
+  color: var(--accent);
+  /* Mirrors activity_main.xml toolbarAiButton TextView: 14sp, textStyle bold,
+     textColor colorSecondary (accent). */
+  font-size: 0.875rem;  /* 14sp */
+  font-weight: 700;     /* bold */
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.toolbar__ai-chip:active { background: var(--surface-2); }
+
+/* Tab bar (BottomNavigationView) — 1:1 with Widget.Animastor.BottomNavigation
+   + @color/bottom_nav_tint.xml:
+     backgroundTint  = colorSurface
+     itemIconTint / itemTextColor (unchecked) = colorOnSurfaceVariant (--text-2)
+     checked = colorSecondary → cinema_accent (--accent, GOLD) for icon AND label
+     active indicator pill = colorPrimary (Widget.Animastor.BottomNavIndicator,
+                             ShapeAppearance.Small 12dp) — anchored to the icon
+                             box so it never overlaps the label. */
+.tabbar {
+  height: calc(var(--tabbar-h) + var(--safe-bottom));
+  padding-bottom: var(--safe-bottom);
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  background: var(--surface);
+  border-top: 1px solid var(--outline-2);
+  box-shadow: var(--elev-3);
+  z-index: 5;
+}
+.tabbar__item {
+  position: relative;
+  border: 0; background: transparent; color: var(--text-2); /* unchecked: colorOnSurfaceVariant */
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  /* 6dp icon→label gap (compacted from 8dp for density): the 32dp pill is
+     centered on the 24dp icon and extends 4dp below it, so pill bottom → label
+     top still clears by ~2dp — and the pill sits behind the label anyway
+     (z-index 0 vs 1). */
+  gap: 0.375rem;
+  /* TextAppearance.Animastor.TabLabel (parent TextAppearance.Material3.LabelLarge):
+     textSize 14sp, fontFamily sans-serif-medium (Roboto Medium), textFontWeight 500.
+     Web: system-ui resolves to Roboto on Android. Compacted to 13sp for the
+     denser 70dp web bar: the widest label «Навигатор» (~66px @13sp) fits its
+     72px column (narrowest 360px test viewport) with ~3px side margins, leaving
+     a clean ~10px gap to «Редактор». */
+  font-size: 0.8125rem; /* 13sp (compacted from 14sp) */
+  font-weight: 500;
+  letter-spacing: 0.01em;  /* M3 LabelLarge tracking */
+  line-height: 1.125rem;   /* 18px — ~5px slack above the 13sp text */
+  min-height: 0; min-width: 0; /* min-width: 0 lets the 1fr grid columns shrink below label content on sub-360px viewports */
+  padding: 0;
+}
+/* Icon box hosts the M3 active-indicator pill; pill is centered on the icon
+   (top:50%/left:50% + translate) so it can never overlap the label below. */
+.tabbar__icon-box { position: relative; display: inline-flex; }
+.tabbar__icon { width: 1.5rem; height: 1.5rem; position: relative; z-index: 1; }
+/* Defensive net for sub-360px viewports: inline-block shrink-wraps the text so
+   the flex parent keeps centering it, and ellipsis clips instead of letting a
+   label spill into its neighbor. At 360px the widest label («Навигатор» ≈ 66px)
+   fits its 72px column, so this never triggers on the test viewports. */
+.tabbar__label {
+  position: relative; z-index: 1;
+  display: inline-block;
+  max-width: 100%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Active indicator pill: colorPrimary (#6E1F2A), fixed 64x32dp, 12dp radius.
+   M3 indicator geometry is fixed regardless of the icon width, so NO max-width:
+   calc(100% …) here would resolve against the 24px icon-box and squash the pill. */
+.tabbar__item--active .tabbar__icon-box::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 4rem;   /* 64dp */
+  height: 2rem;  /* 32dp */
+  border-radius: var(--radius-sm); /* 12dp */
+  background: var(--primary);
+  z-index: 0;
+}
+/* checked: icon AND label turn GOLD (colorSecondary = cinema_accent), like
+   @color/bottom_nav_tint.xml state_checked. */
+.tabbar__item--active { color: var(--accent); }
+/* Press feedback ≈ itemRippleColor = colorPrimaryContainer (soft radial, no JS) */
+.tabbar__item:active {
+  background: radial-gradient(circle, var(--primary-container) 0%, transparent 72%);
+  border-radius: var(--radius-sm); /* keep the gradient's corners soft */
+}
+/* RUNNING — gold pulse like MainActivity.updateNavIconStatus: tint =
+   cinema_accent (--accent) + ObjectAnimator alpha 1→0.35→1, 1600ms infinite.
+   The explicit color matters when the Generate tab is NOT active — otherwise
+   the icon would pulse in the unselected gray instead of gold. */
+.tabbar__pulse { animation: tab-pulse 1.6s infinite ease-in-out; color: var(--accent); }
+.tabbar__pulse--error { animation: tab-pulse 1.2s infinite ease-in-out; color: var(--error); }
+/* SUCCESS — finite pulse like MainActivity.updateNavIconStatus: ObjectAnimator
+   alpha 1→0.45→1, 1500ms, repeatCount 7 → 8 cycles = 12s pulse green, then
+   solid green for ~10s. Written as explicit longhand animation-* properties so
+   the 8×1.5s = 12s intent survives any CSS minifier / shorthand parsing (a
+   broken shorthand would leave the icon permanently solid green).
+   The keyframes are deliberately named tab-pulse-SUCCESS (not tab-pulse): a CSS
+   animation does NOT restart when only its iteration count changes — RUNNING's
+   infinite `tab-pulse` has been cycling for minutes during generation, and when
+   SUCCESS caps it at 8 iterations the current iteration already exceeds the cap,
+   so the animation just ends and the icon snaps to solid green. A distinct name
+   forces a clean restart with the full 8×1.5s = 12s pulse — the web equivalent
+   of Android creating a brand-new ObjectAnimator on every status change.
+   generateStore auto-resets the nav status to IDLE after the full 22s
+   (pulse + hold), anchored to the SUCCESS timestamp with a self-healing
+   watchdog — no re-arm on tab switches. */
+.tabbar__pulse--success {
+  animation-name: tab-pulse-success;
+  animation-duration: 1.5s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: 8; /* 8 × 1.5s = 12s pulse, then solid green */
+  color: var(--success);
+}
+@keyframes tab-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+/* Same opacity keyframes under a separate name so entering SUCCESS restarts the
+   animation (see comment above) — duplicating the 2 keyframes is the price of a
+   guaranteed restart; the animation-name change tab-pulse → tab-pulse-success
+   is what restarts it. */
+@keyframes tab-pulse-success {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* Generic page */
+.page {
+  flex: 1; display: flex; flex-direction: column;
+  padding: 1rem;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.page--centered { align-items: center; justify-content: center; text-align: center; }
+.page__ph { color: var(--text-2); font-size: var(--fs-body); }
+
+/* Secondary route (overlay above tabs) */
+.secondary {
+  position: absolute; inset: 0;
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  z-index: 10;
+}
+.secondary .page { overflow-y: auto; }
+
+/* Settings */
+.settings__group {
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--outline-2);
+}
+.settings__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.875rem 1rem;
+  font-size: var(--fs-body);
+}
+.settings__row + .settings__row { border-top: 1px solid var(--outline-2); }
+
+/* Segmented control */
+.seg { display: inline-flex; flex-wrap: wrap; gap: 0.25rem; background: var(--surface-2); padding: 0.2rem; border-radius: var(--radius-pill); }
+.seg__btn {
+  border: 0; background: transparent; color: var(--text-2);
+  padding: 0.4rem 0.9rem; border-radius: var(--radius-pill);
+  font-size: 0.8125rem; min-height: 2rem;
+}
+.seg__btn--active { background: var(--primary); color: var(--on-primary); }
+.seg--block { display: flex; }
+.seg--block .seg__btn { flex: 1; }
+
+/* ── Stage 1: settings pages (VBook / Worker) ── */
+/* Mirrors fragment_vbook_settings.xml / fragment_worker_settings.xml:
+   scroll area above a pinned bottom action bar. */
+.settings-page { padding: 0; }
+/* Higher specificity than `.secondary .page { overflow-y: auto }` so the
+   outer container never scrolls — only .settings-page__scroll does. */
+.secondary .settings-page { overflow: hidden; }
+.settings-page__scroll {
+  flex: 1; min-height: 0; /* allow shrinking so the footer stays pinned */
+  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem;
+}
+.settings-page__footer {
+  padding: 0.75rem 1rem calc(0.75rem + var(--safe-bottom));
+  border-top: 1px solid var(--outline-2);
+  background: var(--surface);
+}
+.settings-page__error {
+  color: var(--error); font-size: var(--fs-caption);
+  margin: 0 0 0.5rem;
+}
+.settings-page__notice {
+  color: var(--text-2); font-size: 0.875rem;
+  background: var(--surface-2); border: 1px dashed var(--outline);
+  border-radius: var(--radius-sm); padding: 0.75rem 1rem;
+}
+
+/* MaterialCardView (Widget.Animastor.Card) */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--outline-2);
+  border-radius: var(--radius-md); /* 16dp ≈ 18dp token */
+  box-shadow: var(--elev-1);
+  padding: 1.25rem; /* 20dp */
+  display: flex; flex-direction: column;
+}
+.card__title {
+  font-size: 0.8125rem; /* 13sp */
+  font-weight: 700; letter-spacing: 0.06em;
+  color: var(--text); margin: 0 0 0.5rem;
+}
+.card__label {
+  font-size: 0.8125rem; font-weight: 700; color: var(--text);
+  margin: 0.75rem 0 0.25rem;
+}
+.card__hint {
+  font-size: 0.75rem; /* 12sp */
+  color: var(--text-2); margin-top: 0.5rem; line-height: 1.4;
+}
+.card__hint--wrap { white-space: pre-line; }
+.card__row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.25rem; }
+.card__row--between { justify-content: space-between; }
+.card__value { font-size: 0.875rem; color: var(--text); font-weight: 600; }
+
+/* Spinner → <select> (Widget.Animastor: match_parent/weight=1 width, 40dp height) */
+/* flex: 1 0 auto — grow fills the row width inside .card__row, but flex-basis: auto
+   keeps the height from collapsing when the select is a direct child of the
+   column-flex .card (flex: 1 would set flex-basis 0% on the vertical axis and
+   squash the 40dp height to min-content, unlike Android's fixed 40dp). */
+.select {
+  flex: 1 0 auto; min-width: 0; height: 2.5rem; /* 40dp */
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--outline); border-radius: var(--radius-sm);
+  font-size: 0.875rem; padding: 0 0.5rem;
+}
+.select:disabled { opacity: 0.6; }
+
+/* MaterialButton */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+  height: 3rem; /* 48dp */ padding: 0 1rem;
+  border: 0; border-radius: var(--radius-md); /* 18dp */
+  background: var(--primary); color: var(--on-primary);
+  font-size: 0.9375rem; font-weight: 500; cursor: pointer;
+}
+.btn:active { background: var(--primary-pressed); }
+.btn:disabled { opacity: 0.5; }
+.btn--block { width: 100%; }
+.btn--outlined {
+  background: transparent; color: var(--text);
+  border: 1px solid var(--outline); height: 2.625rem; /* 42dp */
+  font-size: 0.8125rem; padding: 0 0.75rem; flex-shrink: 0;
+}
+.btn--outlined:active { background: var(--surface-2); }
+/* Widget.Animastor.Button.Outlined.Error — stroke + text cinema_error
+   (--error), ripple cinema_error_container (--error-container), 42dp height
+   inherited from .btn--outlined. Used for the Settings clear/delete buttons. */
+.btn--error {
+  color: var(--error);
+  border-color: var(--error);
+  width: 100%;
+}
+.btn--error:active { background: var(--error-container); }
+
+/* Settings: stacked group with a 13sp bold section label (Android TextView
+   letterSpacing 0.06 + bold onSurface) above a full-width control. */
+.settings__group--stack { padding: 0.875rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+.settings__label {
+  font-size: 0.8125rem; /* 13sp */
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+/* TextInputEditText equivalent — outlineVariant underline hint onSurfaceVariant. */
+.settings__input {
+  width: 100%; height: 2.75rem;
+  background: transparent; color: var(--text);
+  border: 0; border-bottom: 1px solid var(--outline);
+  font-size: 0.875rem; padding: 0 0.25rem;
+}
+.settings__input:focus-visible { outline: none; border-bottom-color: var(--accent); }
+.settings__input[readonly] { color: var(--text-2); cursor: default; }
+/* debugInfo TextView — 11sp onSurfaceVariant, monospace for URLs. */
+.settings__debug {
+  margin: 0; padding: 0;
+  font-size: 0.6875rem; /* 11sp */
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--text-2); white-space: pre-line;
+}
+
+/* Library (LibraryFragment: toolbar + WebView → iframe) */
+.library-page {
+  flex: 1; display: flex; flex-direction: column; min-height: 0;
+  background: var(--surface);
+}
+.library-page__frame { flex: 1; width: 100%; border: 0; min-height: 0; }
+.library-page__open {
+  text-align: center; padding: 0.5rem 1rem calc(0.5rem + var(--safe-bottom));
+  color: var(--accent); font-size: 0.8125rem; text-decoration: none;
+  border-top: 1px solid var(--outline-2); background: var(--surface);
+}
+
+/* ── File (fragment_file.xml, stage 3) ──
+   MaterialCardView entries (16dp radius, 1dp elevation, colorSurface) with a
+   24dp icon tinted colorOnSurfaceVariant, 16sp medium title, 13sp desc;
+   disabled state mirrors android:enabled="false". */
+.file-page { padding: 1rem; }
+.file-card {
+  display: flex; align-items: center; gap: 1rem; /* 16dp icon→text */
+  width: 100%; text-align: left; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--outline-2);
+  border-radius: var(--radius-md); box-shadow: var(--elev-1);
+  padding: 1.25rem; /* 20dp — card content padding */
+  color: inherit; font: inherit;
+}
+.file-card + .file-card { margin-top: 0.75rem; } /* 12dp Android marginTop */
+.file-card:active { background: var(--surface-2); }
+.file-card:disabled { opacity: 0.55; cursor: default; }
+.file-card:disabled:active { background: var(--surface); }
+.file-card__icon {
+  width: 1.5rem; height: 1.5rem; /* 24dp */
+  color: var(--text-2); /* app:tint colorOnSurfaceVariant */
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.file-card__body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.file-card__title {
+  font-size: 1rem; /* 16sp */ font-weight: 500; /* sans-serif-medium */
+  color: var(--text);
+}
+.file-card__desc {
+  font-size: 0.8125rem; /* 13sp */ color: var(--text-2);
+  margin-top: 0.25rem; line-height: 1.35;
+}
+.file-page__label {
+  font-size: 0.8125rem; /* 13sp */ font-weight: 700;
+  color: var(--text-2); letter-spacing: 0.02em;
+  margin: 1rem 0.25rem 0.375rem;
+}
+/* Progress bar + status text (marginHorizontal 32dp, 13sp centered onSurfaceVariant) */
+.file-page__bar { margin: 1rem 2rem 0; }
+.file-page__status {
+  margin: 0.5rem 2rem 0; text-align: center;
+  font-size: 0.8125rem; color: var(--text-2);
+}
+.progress--determinate .progress__bar { animation: none; }
+/* Drag & drop affordance (web-only, 06 §12) */
+.file-card--drag {
+  outline: 2px dashed var(--accent); outline-offset: -2px;
+  background: var(--surface-2);
+}
+
+/* ── Generate (fragment_generate.xml, stage 4) ──
+   1:1 with the Android screen: position bar card, Global section, four worker
+   sections (header row with accent bar/icon/label/gear/toggle chip, progress
+   rows item_worker_progress, Generate/Stop buttons). */
+.gen-page { padding: 0.75rem 1rem 1rem; gap: 0.75rem; }
+
+/* Position bar (include_position_bar) — soft gray gradient per-theme
+   (--posbar-gradient) tuned to the web palette so the bar visually separates
+   from the flat page background. Label = weight 1 + centered (13sp medium
+   accent); unitCount 12sp accent pinned to the RIGHT edge (paddingHorizontal
+   8dp, no divider) — alignment like the Android layout. */
+.gen-posbar {
+  display: flex; align-items: center;
+  width: 100%; padding: 0.625rem; /* 10dp */
+  background: var(--posbar-gradient); border: 0; border-radius: var(--radius-sm); /* 12dp */
+  color: var(--accent); cursor: pointer; flex-shrink: 0;
+}
+.gen-posbar:active { background: var(--surface-dim); }
+.gen-posbar__label {
+  flex: 1; min-width: 0; text-align: center; /* weight=1 + gravity=center */
+  font-size: 0.8125rem; /* 13sp */ font-weight: 500; /* sans-serif-medium */
+  color: var(--accent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gen-posbar__units {
+  font-size: 0.75rem; /* 12sp */ color: var(--accent);
+  padding: 0 0.5rem; /* paddingHorizontal 8dp */ flex-shrink: 0;
+}
+
+/* Worker section card (MaterialCardView 16dp radius) */
+.gen-card { margin-bottom: 0; }
+.gen-card__label {
+  font-size: 0.6875rem; /* 11sp */ font-weight: 500;
+  color: var(--text-2); text-transform: uppercase; letter-spacing: 0.08em;
+  margin-bottom: 0.75rem;
+}
+
+/* Global section buttons (52dp like Android) */
+.gen-global-row { display: flex; gap: 0.5rem; }
+.gen-btn--global { flex: 1; height: 3.25rem; } /* 52dp */
+
+/* Header row — updateHeaderPanelStyle: GradientDrawable cornerRadius 12dp.
+   Solid bg via --worker-panel-off/on — EXACT Android dark-theme values
+   (OFF = cinema_worker_panel_off #25211E, ON = cinema_worker_panel_on
+   #2D2A26); gold stays reserved for the accent bar. */
+.gen-header {
+  display: flex; align-items: center; gap: 0.625rem;
+  padding: 0.375rem 0.25rem; /* 6dp top/bottom, 4dp start/end */
+  border-radius: var(--radius-sm); /* 12dp — nested rounded inside 16dp card */
+  background: var(--worker-panel-off);
+  cursor: pointer; user-select: none;
+}
+.gen-header--on { background: var(--worker-panel-on); } /* ON: slightly darker */
+.gen-header__bar {
+  width: 3px; height: 2rem; border-radius: 2px; flex-shrink: 0;
+  background: var(--outline-2); /* disabled: cinema_outline_variant */
+}
+.gen-header__bar--on { background: var(--accent); }
+.gen-header__icon {
+  display: inline-flex; flex-shrink: 0; color: var(--text-2);
+  transition: color .15s;
+}
+.gen-header__icon--active { color: var(--accent); }
+.gen-header__icon--error { color: var(--error); }
+.gen-header__icon--normal { color: var(--text-2); }
+.gen-header__icon--off { color: var(--text-2); opacity: .6; }
+/* pulse — ObjectAnimator alpha 1→0.4→1, 1600ms infinite */
+.gen-header__icon--pulse { animation: gen-pulse 1.6s infinite ease-in-out; }
+@keyframes gen-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+/* Label color is tied to the panel state (workerLabelColor): base = OFF panel
+   (muted #989084), .gen-header--on = readable secondary #B8AFA3 — same hexes
+   as Android cinema_worker_label_off/on. Generation/active/error icon sync is
+   unchanged (icon-only gold/red pulse). */
+.gen-header__label {
+  flex: 1; min-width: 0; font-size: 0.9375rem; /* 15sp */ font-weight: 500;
+  color: var(--worker-label-off); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gen-header--on .gen-header__label { color: var(--worker-label-on); }
+.gen-header__gear {
+  border: 0; background: transparent; color: var(--text-2);
+  width: 2rem; height: 2rem; display: inline-flex; align-items: center;
+  justify-content: center; border-radius: var(--radius-sm); flex-shrink: 0;
+}
+.gen-header__gear:active { background: var(--surface-dim); }
+
+/* Toggle chip — 1:1 with Widget.Animastor.Chip.Toggle (Material3 Filter chip):
+   62-64dp wide, 32dp tall, cornerRadius 12dp, stroke 1.5dp, elevation 0.
+   unchecked: bg colorSurfaceVariant, stroke colorOutlineVariant, text
+   colorOnSurfaceVariant; checked: bg colorSecondaryContainer, stroke
+   colorSecondary, text colorOnSecondaryContainer. Text alignment END/START
+   (updateToggleText): On/Вкл → right, Off/Выкл → left. */
+.gen-toggle {
+  min-width: 4rem; height: 2rem; flex-shrink: 0;
+  border: 1.5px solid var(--outline-2); border-radius: 0.75rem; /* 12dp */
+  background: var(--surface-2); color: var(--text-2);
+  font-size: 0.75rem; /* 12sp */ font-weight: 500; /* M3 chip label medium */
+  padding: 0 0.75rem; text-align: left; cursor: pointer;
+}
+.gen-toggle--on {
+  border-color: var(--accent);
+  background: var(--accent-container);
+  color: var(--on-accent-container);
+  text-align: right;
+}
+
+/* Progress rows container (item_worker_progress) */
+.gen-rows { display: flex; flex-direction: column; margin-top: 0.5rem; }
+.gen-row {
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-sm);
+}
+.gen-row__line { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.gen-row__name {
+  flex: 1; min-width: 0; font-size: 0.75rem; /* 12sp */ font-weight: 500;
+  color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gen-row__name--done { color: var(--success); }
+.gen-row__name--cancelled { color: var(--error); }
+.gen-row__count { font-size: 0.75rem; color: var(--text-2); flex-shrink: 0; }
+.gen-row__count--done { color: var(--success); }
+.gen-row__pct {
+  font-size: 0.8125rem; /* 13sp */ font-weight: 700; color: var(--accent);
+  min-width: 2.5rem; text-align: right; flex-shrink: 0;
+}
+.gen-row__pct--done { color: var(--success); }
+.gen-row__timer {
+  font-size: 0.75rem; color: var(--text-2); flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.gen-row__stop {
+  border: 0; background: transparent; color: var(--error);
+  width: 2rem; height: 2rem; display: inline-flex; align-items: center;
+  justify-content: center; border-radius: var(--radius-sm); flex-shrink: 0;
+}
+.gen-row__stop:active { background: var(--error-container, var(--surface-dim)); }
+/* Progress track (LinearProgressIndicator, 4dp) */
+.gen-row__bar {
+  height: 4px; border-radius: 2px; overflow: hidden;
+  background: var(--surface-dim); margin-top: 0.125rem;
+}
+.gen-row__bar-fill {
+  height: 100%; background: var(--accent);
+  transition: width .4s ease;
+}
+.gen-row__bar-fill--done { background: var(--success); }
+.gen-row__bar-ind {
+  height: 100%; background: var(--accent);
+  animation: gen-indeterminate 1.2s infinite cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: left;
+}
+@keyframes gen-indeterminate {
+  0% { transform: translateX(-100%) scaleX(0.4); }
+  50% { transform: translateX(0%) scaleX(0.4); }
+  100% { transform: translateX(100%) scaleX(0.4); }
+}
+
+/* Section action buttons (Generate 48dp flex + Stop 96dp min, outlined) */
+.gen-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.gen-btn {
+  flex: 1; height: 3rem; /* 48dp */ padding: 0 0.5rem;
+  background: transparent; color: var(--text);
+  border: 3px solid var(--outline); border-radius: var(--radius-md);
+  /* 3dp stroke — Android sets app:strokeWidth="3dp" on every Generate button
+     (generateVBook/audio/image/video + generateAll). */
+  font-size: 0.875rem; font-weight: 500; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.375rem;
+  min-width: 0;
+}
+.gen-btn:active { background: var(--surface-2); }
+.gen-btn--stop {
+  flex: 0 0 6rem; /* 96dp min */ min-width: 6rem;
+  border-color: var(--error); color: var(--error);
+  border-width: 1px; /* Stop = Widget.Animastor.Button.Outlined.Error (M3 default 1dp) */
+}
+
+/* Row stop popup (PopupMenu — worker_stop_menu_cancel) */
+.gen-popup-backdrop {
+  position: fixed; inset: 0; z-index: 90;
+  background: transparent;
+}
+.gen-popup {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: var(--surface); border: 1px solid var(--outline-2);
+  border-radius: var(--radius-sm); box-shadow: var(--elev-3);
+  min-width: 10rem; padding: 0.25rem;
+}
+.gen-popup__item {
+  display: block; width: 100%; text-align: left;
+  border: 0; background: transparent; color: var(--text);
+  font-size: 0.875rem; padding: 0.625rem 0.75rem;
+  border-radius: var(--radius-sm); cursor: pointer;
+}
+.gen-popup__item:active { background: var(--surface-2); }
+
+/* Scope dialog radio options (DialogGenerateScopeBinding, 48dp rows) */
+.gen-scope {
+  display: flex; align-items: center; gap: 0.625rem;
+  min-height: 3rem; /* 48dp */ font-size: 0.875rem; color: var(--text);
+  cursor: pointer;
+}
+.gen-scope input { accent-color: var(--accent); width: 1.125rem; height: 1.125rem; }
+.gen-scope--disabled { opacity: 0.4; cursor: default; }
+
+/* Settings nav rows (VBook / Worker links from /settings) */
+.settings__nav-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+  width: 100%; padding: 0.875rem 1rem;
+  background: transparent; border: 0; color: var(--text);
+  font-size: var(--fs-body); text-align: left; cursor: pointer;
+}
+.settings__nav-row:active { background: var(--surface-2); }
+.settings__nav-row .chev { color: var(--text-2); flex-shrink: 0; }
+
+/* ════════════════════════════════════════════════════
+   Stage 2 — Workflows / Developer / AI screens
+   ════════════════════════════════════════════════════ */
+
+/* LinearProgressIndicator (indeterminate) */
+.progress {
+  height: 4px; overflow: hidden; border-radius: 2px;
+  background: var(--surface-2); position: relative; flex-shrink: 0;
+}
+.progress__bar {
+  position: absolute; inset: 0;
+  background: var(--accent);
+  animation: progress-indeterminate 1.2s infinite cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: left;
+}
+@keyframes progress-indeterminate {
+  0% { transform: translateX(-100%) scaleX(0.4); }
+  50% { transform: translateX(0%) scaleX(0.4); }
+  100% { transform: translateX(100%) scaleX(0.4); }
+}
+
+/* errorText (colorError) */
+.wf-error {
+  color: var(--error); font-size: 0.875rem; margin: 0 0 0.5rem;
+}
+
+/* ── Workflow Manager (fragment_workflow_manager.xml) ── */
+.wf-page { gap: 0.75rem; }
+.wf-card__title {
+  font-size: 1rem; font-weight: 500; /* sans-serif-medium */
+  color: var(--text); margin: 0;
+}
+.wf-card__subtitle {
+  font-size: 0.8125rem; color: var(--text-2); margin-top: 0.25rem;
+}
+.wf-card__count {
+  font-size: 0.8125rem; color: var(--text); margin-top: 0.75rem;
+}
+.wf-card__manage {
+  align-self: flex-end; margin-top: 0.75rem;
+}
+
+/* ── Workflow Type List (fragment_workflow_type_list.xml) ── */
+.wf-page--list { padding-bottom: 0; }
+.wf-page__footer {
+  margin-top: auto;
+  padding: 0.75rem 0 calc(0.75rem + var(--safe-bottom));
+  position: sticky; bottom: 0; background: var(--bg);
+}
+.wf-entry { cursor: pointer; }
+.wf-entry__row {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+}
+.wf-entry__label {
+  font-size: 0.9375rem; font-weight: 700; color: var(--text);
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.wf-entry__connector {
+  font-size: 0.75rem; color: var(--text-2); margin: 0.25rem 0 0;
+}
+.wf-entry__actions { margin-top: 0.75rem; }
+.wf-entry__details { height: 2.375rem; }
+
+/* Status badges */
+.wf-status {
+  font-size: 0.75rem; font-weight: 700; flex-shrink: 0;
+}
+.wf-status--ok { color: var(--success); }
+.wf-status--error { color: var(--error); }
+.wf-status--accent { color: var(--accent); }
+.wf-status--muted { color: var(--text-2); }
+
+/* ── Switch (SwitchMaterial) ── */
+.switch {
+  width: 3.25rem; height: 2rem; border-radius: var(--radius-pill);
+  background: var(--surface-2); border: 2px solid var(--outline);
+  position: relative; cursor: pointer; transition: background .18s, border-color .18s;
+  padding: 0; flex-shrink: 0;
+}
+.switch__thumb {
+  position: absolute; top: 50%; left: 0.125rem;
+  width: 1.25rem; height: 1.25rem; border-radius: 50%;
+  background: var(--text-2);
+  transform: translateY(-50%); transition: left .18s, background .18s;
+}
+.switch--on { background: var(--accent); border-color: var(--accent); }
+.switch--on .switch__thumb { left: calc(100% - 1.375rem); background: var(--on-accent); }
+
+/* ── Tabs (Widget.Animastor.TabLayout: selected colorSecondary, 3dp indicator) ── */
+.tabs {
+  display: flex; border-bottom: 1px solid var(--outline-2); flex-shrink: 0;
+  background: var(--surface); border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+.tabs__item {
+  flex: 1; border: 0; background: transparent; color: var(--text-2);
+  font-size: 0.8125rem; font-weight: 600; letter-spacing: 0.01em;
+  padding: 0.75rem 0.25rem; position: relative; min-height: 2.75rem;
+}
+.tabs__item--active { color: var(--accent); }
+.tabs__item--active::after {
+  content: ''; position: absolute; left: 12%; right: 12%; bottom: 0;
+  height: 3px; background: var(--accent); border-radius: 2px 2px 0 0;
+}
+
+/* ── Workflow Details (fragment_workflow_details.xml + tab content) ── */
+.wf-header__row {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+  padding: 0.25rem 0;
+}
+.wf-header__row > span { font-size: 0.75rem; color: var(--text-2); }
+.wf-header__row > b { font-size: 0.75rem; color: var(--text); text-align: right; }
+.wf-header__row--wrap > b { overflow-wrap: anywhere; }
+.wf-hash {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.6875rem; color: var(--text-2);
+}
+/* Toolbar action chip — the "</>" dev chip, added to the secondary toolbar by
+   pages via titleStore.setSecondaryAction. 1:1 with the Android chip
+   (WorkflowDetailsFragment: b.toolbar.addView(devChip), gravity END, marginEnd
+   16): Material3 Chip, chipMinHeight 32dp, all corners 12dp, stroke 1.5dp,
+   text 13sp medium. */
+.toolbar__chip {
+  height: 2rem;              /* 32dp — M3 chip height */
+  min-width: 2.25rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 0.75rem;        /* horizontal only; height fixed at 32dp */
+  border: 1.5px solid var(--accent); background: transparent; color: var(--accent);
+  border-radius: 0.75rem;    /* 12dp */
+  font-size: 0.8125rem;      /* 13sp */
+  font-weight: 500;          /* M3 chip text (labelLarge) is medium, not bold */
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  /* Android marginEnd 16dp; toolbar row padding is 12px, so +4px = 16dp */
+  margin-right: 0.25rem;
+}
+.toolbar__chip:active { background: var(--accent-container); }
+.wf-tab-content {
+  display: flex; flex-direction: column; gap: 0.5rem; padding-top: 0.75rem;
+}
+.wf-empty {
+  color: var(--text-2); font-size: 0.875rem; text-align: center; padding: 2rem 0;
+}
+.wf-guide-header {
+  color: var(--accent); font-size: 0.8125rem; font-weight: 700; margin-top: 0.5rem;
+}
+.wf-binding { padding: 0.875rem 1rem; }
+.wf-binding__top {
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.wf-binding__label {
+  font-size: 0.9375rem; font-weight: 700; color: var(--text);
+  flex: 1; min-width: 0;
+}
+.wf-binding__edit { height: 2.125rem; padding: 0 0.5rem; font-size: 0.6875rem; }
+.wf-binding__edit-link {
+  border: 0; background: transparent; color: var(--accent);
+  font-size: 0.8125rem; font-weight: 600; cursor: pointer; padding: 0.25rem;
+}
+.wf-binding__value {
+  font-size: 0.8125rem; color: var(--text-2); margin: 0.125rem 0 0;
+  overflow-wrap: anywhere;
+}
+.wf-binding__info {
+  font-size: 0.75rem; color: var(--text-2); margin: 0.25rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+/* ── Dialogs (dialog_edit_parameter.xml + node picker) ── */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: var(--scrim);
+  display: flex; align-items: center; justify-content: center;
+  padding: 1.5rem;
+}
+.modal {
+  background: var(--surface); border: 1px solid var(--outline-2);
+  border-radius: var(--radius-md); box-shadow: var(--elev-3);
+  width: 100%; max-width: 26rem; max-height: 80vh;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.modal__title {
+  font-size: 1rem; font-weight: 700; color: var(--text);
+  padding: 1rem 1.25rem 0.25rem;
+}
+.modal__body { padding: 0.75rem 1.25rem; overflow-y: auto; }
+.modal__footer {
+  display: flex; gap: 0.5rem; justify-content: flex-end;
+  padding: 0.75rem 1.25rem 1.25rem;
+}
+.wf-dialog__label { font-size: 0.8125rem; color: var(--text); margin: 0 0 0.25rem; }
+.wf-dialog__info { font-size: 0.75rem; color: var(--text-2); margin: 0 0 0.75rem; }
+.wf-dialog__input { width: 100%; flex: none; }
+.wf-node-list { display: flex; flex-direction: column; gap: 0.375rem; max-height: 50vh; overflow-y: auto; }
+.wf-node {
+  display: flex; align-items: center; gap: 0.5rem;
+  background: var(--surface-2); border: 1px solid transparent;
+  border-radius: var(--radius-sm); padding: 0.625rem 0.75rem;
+  cursor: pointer; font-size: 0.8125rem;
+}
+.wf-node--on { border-color: var(--accent); }
+.wf-node input { accent-color: var(--accent); }
+
+/* ── Full-size image zoom dialog (Edit carousel) ── */
+.zoom-backdrop {
+  position: fixed; inset: 0; z-index: 150;
+  background: var(--scrim);
+  display: flex; align-items: center; justify-content: center;
+  padding: 2rem;
+  animation: zoom-fade .15s ease-out;
+}
+.zoom {
+  position: relative;
+  max-width: 100%; max-height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  animation: zoom-pop .18s ease-out;
+}
+.zoom__img {
+  max-width: 100%; max-height: 86vh;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--elev-3);
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.zoom__fallback {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 0.5rem;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+}
+.zoom__label {
+  position: absolute; left: 0; right: 0; bottom: -1.75rem;
+  text-align: center;
+  color: var(--text);
+  font-size: 0.8125rem; font-weight: 500;
+  text-shadow: 0 1px 3px rgba(0,0,0,.6);
+  pointer-events: none;
+}
+.zoom__close {
+  position: absolute; top: 0.5rem; right: 0.5rem;
+  width: 2.5rem; height: 2.5rem;
+  border: 0; border-radius: var(--radius-pill);
+  background: var(--surface-dim); color: var(--text);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--elev-1);
+}
+.zoom__close:active { background: var(--outline-2); }
+@keyframes zoom-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes zoom-pop { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+
+/* ── Toast ── */
+.toast-root {
+  position: fixed; left: 0; right: 0; bottom: calc(var(--safe-bottom) + 5.5rem);
+  display: flex; justify-content: center; z-index: 200; pointer-events: none;
+}
+.toast {
+  background: var(--text); color: var(--bg);
+  border-radius: var(--radius-pill); padding: 0.625rem 1.25rem;
+  font-size: 0.8125rem; box-shadow: var(--elev-2);
+  opacity: 0; transform: translateY(0.5rem); transition: opacity .2s, transform .2s;
+}
+.toast--show { opacity: 1; transform: translateY(0); }
+
+/* ── Developer View (fragment_developer_view.xml) ── */
+.dev-json {
+  background: var(--surface-2); border-radius: var(--radius-sm);
+  padding: 0.75rem; margin-top: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.6875rem; line-height: 1.5; color: var(--text);
+  overflow-x: auto; white-space: pre; user-select: text;
+}
+.dev-row { padding: 0.75rem 1rem; }
+
+/* ── AI Assistant (fragment_ai_assistant.xml) ── */
+.ai-page {
+  flex: 1; display: flex; flex-direction: column; min-height: 0;
+  background: var(--surface);
+}
+.ai-header {
+  display: flex; align-items: center; gap: 0.25rem;
+  padding: 0.5rem 0.5rem 0;
+}
+/* Position bar — now a flex item IN the header row between the session-list
+   and new-chat buttons, 1:1 with fragment_ai_assistant.xml (0dp positionBar on
+   the top row, constrained between the two buttons).
+   NOTE: kept a block container (no display:flex) because text-overflow:ellipsis
+   only applies to block containers; vertical centering via line-height 40px
+   (same as the toolbar buttons). */
+.ai-posbar {
+  flex: 1; min-width: 0; align-self: stretch;
+  background: var(--surface-2); border-radius: 0.75rem;
+  color: var(--accent); font-size: 0.8125rem; font-weight: 500;
+  line-height: 2.5rem; /* 40dp — matches the header buttons, centers the text */
+  text-align: center;
+  padding: 0 0.5rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ai-mode-row {
+  display: flex; align-items: center; gap: 0.25rem;
+  padding: 0.5rem 0.5rem 0.25rem;
+}
+.ai-mode-scroll {
+  border: 0; background: transparent; color: var(--text-2);
+  width: 1.75rem; height: 2.25rem; display: inline-flex;
+  align-items: center; justify-content: center; flex-shrink: 0;
+}
+.ai-mode-scroll:disabled { opacity: 0.3; }
+.ai-mode-scroll-x {
+  display: flex; gap: 0.5rem; overflow-x: auto; scrollbar-width: none;
+  flex: 1; min-width: 0; padding: 0.125rem 0;
+}
+.ai-mode-scroll-x::-webkit-scrollbar { display: none; }
+.chip--mode {
+  display: inline-flex; align-items: center; gap: 0.375rem;
+  height: 2.5rem; min-width: 5.5rem; padding: 0 1rem;
+  border: 0; border-radius: 1.25rem; /* 20dp */
+  background: var(--surface-2); color: var(--text-2);
+  font-size: 0.8125rem; font-weight: 500; flex-shrink: 0; cursor: pointer;
+}
+.chip--mode-active { background: var(--primary); color: var(--on-primary); }
+
+/* Message list */
+.ai-list {
+  flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 0.5rem 0.75rem; display: flex; flex-direction: column;
+}
+.ai-bubble-wrap {
+  display: flex; margin: 0.2rem 0; width: 100%;
+}
+.ai-bubble-wrap--user { justify-content: flex-end; }
+.ai-bubble-wrap--bot { justify-content: flex-start; }
+.ai-bubble {
+  position: relative; max-width: 17.5rem; /* 280dp */
+  padding: 0.625rem 0.875rem 2.25rem; /* bottom room for copy button */
+  font-size: 0.9375rem; line-height: 1.45;
+}
+.ai-bubble--user {
+  background: var(--accent-container); color: var(--text);
+  border-radius: 1rem 1rem 0.25rem 1rem;
+}
+.ai-bubble--bot {
+  background: var(--surface-2); color: var(--text);
+  border-radius: 1rem 1rem 1rem 0.25rem;
+}
+.ai-bubble__text { overflow-wrap: anywhere; }
+.ai-bubble__text pre {
+  background: var(--surface-dim); padding: 0.5rem; border-radius: 0.5rem;
+  overflow-x: auto; font-size: 0.75rem; margin: 0.375rem 0;
+}
+.ai-bubble__text code { font-family: ui-monospace, monospace; font-size: 0.8125rem; }
+.ai-bubble__text a { color: var(--accent); }
+.ai-bubble__text blockquote {
+  border-left: 3px solid var(--outline); padding-left: 0.5rem;
+  margin: 0.25rem 0; color: var(--text-2);
+}
+.ai-bubble__text ul { margin: 0.25rem 0; padding-left: 1.25rem; }
+.ai-bubble__dl {
+  display: block; color: var(--accent); font-size: 0.75rem; font-weight: 600;
+  margin-top: 0.375rem;
+}
+.ai-bubble__copy {
+  position: absolute; right: 0.5rem; bottom: 0.25rem;
+  border: 0; background: transparent; color: var(--text-2); opacity: 0.45;
+  padding: 0.25rem; display: inline-flex; cursor: pointer;
+}
+.ai-bubble__copy:active { opacity: 1; }
+.ai-bubble--typing {
+  display: flex; align-items: center; gap: 0.3125rem;
+  height: 2.5rem; padding: 0 1rem 0; min-width: 3.75rem;
+}
+.ai-typing-dot {
+  width: 0.5rem; height: 0.5rem; border-radius: 50%;
+  background: var(--text-2); animation: ai-typing 1.2s infinite ease-in-out;
+}
+.ai-typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.ai-typing-dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes ai-typing {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+
+/* Input bar (56dp, surfaceContainer) */
+.ai-input {
+  display: flex; align-items: center; gap: 0.25rem;
+  padding: 0.375rem 0.5rem calc(0.375rem + var(--safe-bottom));
+  border-top: 1px solid var(--outline-2); background: var(--surface-2);
+}
+.ai-input__btn {
+  width: 2.5rem; height: 2.5rem; flex-shrink: 0;
+  border: 0; background: transparent; color: var(--text-2);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.ai-input__btn--send { color: var(--accent); }
+.ai-input__btn:disabled { opacity: 0.35; }
+.ai-input__field {
+  flex: 1; min-width: 0; height: 3rem; border: 0; background: transparent;
+  color: var(--text); font-size: 0.9375rem; padding: 0 0.5rem;
+}
+.ai-input__field::placeholder { color: var(--text-2); }
+
+/* Session list dialog */
+.ai-session-list { display: flex; flex-direction: column; gap: 0.375rem; }
+.ai-session {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+  background: var(--surface-2); border: 1px solid transparent;
+  border-radius: var(--radius-sm); padding: 0.625rem 0.75rem; cursor: pointer;
+}
+.ai-session--active { border-color: var(--accent); }
+.ai-session__info { display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; }
+.ai-session__info b { font-size: 0.8125rem; color: var(--text); }
+.ai-session__info span { font-size: 0.75rem; color: var(--text-2); }
+.ai-session__del {
+  border: 0; background: transparent; color: var(--error);
+  font-size: 0.75rem; cursor: pointer; padding: 0.25rem; flex-shrink: 0;
+}
+
+/* ════════════════════════════════════════════════════
+   Stage 5 — Navigate (fragment_navigate.xml)
+   ════════════════════════════════════════════════════
+   Position bar reused (.gen-posbar); structure list rows 1:1 with
+   BookStructureAdapter: chapters (15sp bold accent, bg surface, 16dp indent),
+   scenes (14sp onSurface, bg surfaceVariant, 48dp indent, 12dp radius card),
+   units (13sp single-line ellipsis, 44dp preview thumb, active =
+   secondaryContainer + accent bold). */
+.nav-page { padding: 0.75rem 1rem 1rem; gap: 0.75rem; }
+.nav-progress { margin-top: 0.125rem; }
+.nav-empty {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  color: var(--text-2); font-size: 0.9375rem; text-align: center;
+  padding: 2rem 1rem;
+}
+.nav-list { display: flex; flex-direction: column; }
+.nav-item {
+  display: flex; align-items: center; gap: 0.5rem;
+  width: 100%; text-align: left; border: 0;
+  border-radius: var(--radius-sm); /* 12dp MaterialCardView radius */
+  margin-bottom: 0.25rem; /* 4dp Android margin */
+  cursor: pointer; color: inherit; font: inherit;
+}
+.nav-item:active { filter: brightness(0.94); }
+.nav-item__text { flex: 1; min-width: 0; }
+.nav-item--chapter {
+  background: var(--surface);
+  padding: 0.875rem 1rem 0.875rem 1rem; /* 14dp top/bottom, 16dp sides; indent 8dp → 16dp */
+  font-size: 0.9375rem; /* 15sp */
+  font-weight: 700;
+  color: var(--accent); /* colorSecondary */
+}
+/* Scene buttons — same treatment as units: distinct bg token + hairline border
+   so the rows separate from the page background (Android colorSurfaceVariant on
+   colorSurfaceDim was near-invisible on the darker web page bg). */
+.nav-item--scene {
+  background: var(--nav-scene-bg);
+  border: 1px solid var(--outline-2);
+  padding: 0.75rem 1rem 0.75rem 3rem; /* 12dp; indent 24dp → 48dp */
+  font-size: 0.875rem; /* 14sp */
+  font-weight: 400;
+  color: var(--text); /* colorOnSurface */
+}
+/* Unit buttons — 1:1 proportions with Android BookStructureAdapter: the 44dp
+   preview image drives the row height (no extra vertical padding), so the row
+   stays compact (~48dp like Android). A hairline border + --nav-unit-bg make the
+   tappable rectangles clearly readable against the page background in both
+   themes (Android used flat colorSurface on colorSurfaceDim — near-invisible on
+   the darker web page bg). */
+.nav-item--unit {
+  background: var(--nav-unit-bg);
+  border: 1px solid var(--outline-2);
+  padding: 0 1rem 0 0.75rem; /* no vertical padding — the 44px preview drives the
+                                height (like Android 44dp), matching the scene rows */
+  font-size: 0.8125rem; /* 13sp */
+  font-weight: 400;
+  color: var(--text-2); /* colorOnSurfaceVariant */
+}
+.nav-item--unit .nav-item__text {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nav-item--unit-active {
+  background: var(--accent-container); /* colorSecondaryContainer */
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
+/* Desktop unit rows (plan §4.3): a wrapper hosts the select button plus the
+   explicit "open in Player" action on the active row. The 4dp spacing moves
+   from the button to the row so the play button stays centered on the unit. */
+.nav-unit-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0.25rem;
+  min-width: 0;
+}
+.nav-unit-row .nav-item--unit { flex: 1; width: auto; margin-bottom: 0; }
+.nav-unit-row__play {
+  flex-shrink: 0;
+  width: 2.375rem; /* 38px — frequent desktop action */
+  height: 2.375rem;
+  margin-left: 0.25rem;
+  margin-right: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--accent);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.nav-unit-row__play:hover { background: var(--surface-2); color: var(--text); }
+.nav-unit-row__play:focus-visible { outline-offset: 3px; }
+
+/* 44dp preview thumbnail (ImageView centerCrop); ic_image_off fallback tint */
+.nav-item__thumb {
+  width: 2.75rem; height: 2.75rem; flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  background: var(--surface-2);
+  color: var(--text-2);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* ── Edit screen (stage 6) — 1:1 with fragment_edit.xml ── */
+.edit-page {
+  padding: 0.75rem 0.5rem 0.5rem;
+  gap: 0.5rem;
+  overflow: hidden; /* the content area scrolls, not the page */
+  background: var(--surface); /* ?attr/colorSurface */
+  position: relative;
+}
+.edit-posbar { flex-shrink: 0; }
+
+/* Collapsible panels (web deviation — Edit carousel + waveform). Expanded:
+   zero extra layout — a small collapse chevron floats in the top-right corner
+   (absolutely positioned, no height cost); the content keeps its own chrome
+   exactly as before. Collapsed: a thin title strip that re-expands on tap. */
+.edit-panel {
+  position: relative;
+  flex-shrink: 0;
+}
+/* Thin title strip — visible only in the collapsed state */
+.edit-panel__strip {
+  display: none;
+  width: 100%;
+  align-items: center; justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--outline-2); border-radius: var(--radius-sm);
+  background: var(--nav-scene-bg); /* colorSurfaceVariant */
+  color: var(--text-2);
+  font-size: 0.8125rem; /* 13sp labelMedium */
+  font-weight: 600;
+  cursor: pointer;
+}
+.edit-panel__strip:hover { background: var(--surface-dim); }
+.edit-panel__strip:active { background: var(--surface-dim); }
+.edit-panel__title {
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.edit-panel__chev {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.5rem; height: 1.5rem;
+  border-radius: var(--radius-pill);
+  color: var(--text-2);
+}
+/* Collapsed state: show the strip, hide content + floating button */
+.edit-panel--collapsed .edit-panel__strip { display: flex; }
+.edit-panel--collapsed .edit-carousel,
+.edit-panel--collapsed .edit-timeline { display: none; }
+.edit-panel--collapsed .edit-panel__collapse { display: none; }
+/* Small collapse button in the top-right corner (expanded only). 24px and
+   tucked under the corner so it sits above the reset button's empty padding
+   (44dp buttons are vertically centered in the 88dp panel — the chevron only
+   grazes their top padding, never the icon). */
+.edit-panel__collapse {
+  position: absolute; top: 0.25rem; right: 0.375rem;
+  z-index: 3;
+  width: 1.5rem; height: 1.5rem;
+  border: 0; border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.55); /* scrim — readable over images/panels */
+  color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--elev-1);
+}
+.edit-panel__collapse:hover { background: rgba(0, 0, 0, 0.72); }
+.edit-panel__collapse:active { background: rgba(0, 0, 0, 0.85); }
+
+/* Unit carousel — 3 cards like fragment_edit.xml carouselRow
+   (android:gravity="center" — cards vertically centered on one axis; card
+   heights are set per-card from each image's aspect ratio, Android
+   loadPreviewImage: hDp = cardWDp * h/w). The current card is wider and
+   proportionally taller; portrait images keep their proportions.
+   Web deviation: 6% side insets + a wide 20dp gap spread the cards across
+   the row (the ~20% smaller windows stay, but the space is redistributed so
+   cards aren't bunched in the center), per user tuning. */
+.edit-carousel {
+  display: flex;
+  align-items: center; /* gravity="center": card centers on the same line */
+  gap: 1.25rem; /* 20dp — cards spread apart, not bunched in the center */
+  padding: 0 6%; /* windows stay ~20% smaller, sides less empty */
+  flex-shrink: 0;
+}
+.edit-unit-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-sm); /* 12dp side cards */
+  background: var(--surface-dim); /* colorSurfaceDim */
+  border: 1px solid var(--outline-2);
+  cursor: pointer;
+  flex: 1; /* weight 1 */
+  min-height: 8.75rem; /* 140dp floor while the image loads / missing */
+  min-width: 0;
+}
+.edit-unit-card--current {
+  /* Web deviation: weight 1.2 instead of Android's 1.5 — the browser UI
+     leaves less viewport than Android, so the central card is ~20% smaller
+     overall (two 10% steps per user feedback); still 20% wider than the side
+     cards (1.2 vs 1.0) so the active unit stays clearly emphasized. The
+     height is driven by the image itself (img in normal flow), so both
+     dimensions scale together with the aspect ratio. */
+  flex: 1.2;
+  border-radius: 1rem; /* 16dp */
+  background: var(--nav-scene-bg); /* colorSurfaceVariant */
+  box-shadow: var(--elev-1);
+  min-height: 8.75rem; /* 140dp floor */
+}
+.edit-unit-card--hidden { visibility: hidden; }
+.edit-unit-card:active { filter: brightness(0.92); }
+.edit-unit-card__img {
+  /* In normal flow so the image's own aspect ratio sets the card height
+     (Android loadPreviewImage parity: portrait stays portrait, no cropping;
+     the box always matches the intrinsic ratio, so object-fit is irrelevant). */
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.edit-unit-card__icon {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-2); /* tint colorOnSurfaceVariant */
+}
+.edit-unit-card__label {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  text-align: center;
+  background: rgba(0,0,0,.4); /* #66000000 */
+  color: #FFFFFF;
+  font-size: 0.625rem; /* 10sp */
+  font-weight: 500;
+  padding: 2px 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* Audio timeline panel (MaterialCardView 12dp, colorSurfaceVariant) — its own
+   chrome is kept exactly as before the collapse feature; the collapse chevron
+   floats above the top-right corner without affecting the row layout. */
+.edit-timeline {
+  display: flex; align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--nav-scene-bg); /* colorSurfaceVariant */
+  border: 1px solid var(--outline-2);
+  flex-shrink: 0;
+}
+.edit-timeline__btn {
+  width: 2.75rem; height: 2.75rem; flex-shrink: 0;
+  border: 0; background: transparent; color: var(--accent); /* tint colorSecondary */
+  border-radius: var(--radius-pill);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.edit-timeline__btn:active { background: var(--surface-dim); }
+.edit-timeline__wave { flex: 1; min-width: 0; height: 4.5rem; /* 72dp */ }
+
+/* Property tabs (TabLayout scrollable + chevron indicators) */
+.edit-tabs {
+  display: flex; align-items: stretch;
+  background: var(--nav-scene-bg); /* colorSurfaceVariant seamless panel */
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--outline-2);
+  flex-shrink: 0;
+}
+.edit-tabs__scroll {
+  width: 2.25rem; flex-shrink: 0;
+  border: 0; background: transparent; color: var(--text-2);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.edit-tabs__scroll:active { background: var(--surface-dim); }
+.edit-tabs__scroll:disabled { cursor: default; }
+.edit-tabs__scroll-x {
+  flex: 1; min-width: 0;
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.edit-tabs__scroll-x::-webkit-scrollbar { display: none; }
+.edit-tabs__item {
+  position: relative;
+  flex-shrink: 0;
+  min-width: 4.5rem; /* tabMinWidth 72dp — keeps gaps even on short labels */
+  padding: 0.75rem 1.5rem; /* tabPaddingStart/End 24dp */
+  border: 0; background: transparent;
+  color: var(--text-2); /* colorOnSurfaceVariant */
+  font-size: 0.875rem; /* 14sp LabelLarge */
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.edit-tabs__item--active {
+  color: var(--accent); /* colorSecondary */
+}
+.edit-tabs__item--active::after {
+  content: '';
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 2px;
+  background: var(--accent); /* tabIndicatorColor colorSecondary, full-width */
+}
+
+/* Content area (NestedScrollView) */
+.edit-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.125rem 0.5rem 0.5rem; /* right 0.5rem — clear of the scrollbar */
+}
+.edit-section {
+  font-size: 0.875rem; /* 14sp */
+  font-weight: 700;
+  color: var(--accent); /* colorSecondary */
+  padding: 1rem 0 0.25rem;
+}
+/* Unit header — title left, duration right (balanced edges) */
+.edit-section--row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.edit-section__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  white-space: nowrap;
+  /* 8px end inset — Android EditFragment header setPadding(0,16,8,4) parity,
+     and it lands the duration's right edge on the right scroll-chevron SVG of
+     the property tabs (chevron is 20px centered in the 36px button → its right
+     edge sits 8px in from the button, i.e. 16px from the page edge). */
+  margin-right: 0.5rem;
+}
+/* Field cards (TextInputLayout outline in MaterialCardView 12dp) */
+.edit-field {
+  display: flex; flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem 0.625rem 0.625rem;
+  margin-bottom: 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--outline-2);
+  border-radius: var(--radius-sm);
+}
+.edit-field__label {
+  font-size: 0.75rem;
+  color: var(--text-2);
+  user-select: none;
+}
+.edit-field__input {
+  width: 100%;
+  border: 1px solid var(--outline);
+  border-radius: 0.625rem; /* 10dp */
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem; /* 14sp */
+  padding: 0.625rem 0.75rem;
+  outline: none;
+}
+.edit-field__input:focus { border-color: var(--accent); }
+.edit-field__input[readonly] {
+  color: var(--text-2);
+  background: var(--surface-2);
+}
+.edit-field__input--area {
+  resize: vertical;
+  min-height: 4.5rem;
+  text-align: left;
+  line-height: 1.35;
+}
+/* Backend-served frame-prompt char counter (image.prompt / video.action). */
+.edit-field__counter {
+  font-size: 0.6875rem; /* 11sp */
+  color: var(--text-2);
+  text-align: right;
+  margin-top: 0.25rem;
+  user-select: none;
+}
+
+/* Group cards (characters / voices / locations) */
+.edit-card {
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  background: var(--nav-scene-bg);
+  border: 1px solid var(--outline-2);
+  border-radius: var(--radius-sm);
+}
+.edit-card__title {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text);
+  padding: 0.25rem 0 0.375rem;
+}
+.edit-card .edit-field { margin-bottom: 0.375rem; }
+.edit-card--override .edit-field { margin-bottom: 0.375rem; }
+.edit-overrides__hint {
+  font-size: 0.75rem;
+  color: var(--text-2);
+  padding: 0 0 0.375rem;
+}
+.edit-empty-inline {
+  padding: 1rem 0.5rem;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+/* Bottom save row (MaterialButton 48dp, radius 18dp, primary) */
+.edit-bottom {
+  flex-shrink: 0;
+  padding: 0.125rem 0.5rem 0;
+}
+.edit-save {
+  width: 100%;
+  height: 3rem; /* 48dp */
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 0.5rem;
+  border: 0;
+  border-radius: 1.125rem; /* 18dp */
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 0.9375rem; /* 15sp */
+  font-weight: 500;
+  cursor: pointer;
+}
+.edit-save:active { background: var(--primary-pressed); }
+.edit-save:disabled { cursor: default; }
+
+/* Dirty indicator (11sp colorSecondary) */
+.edit-dirty {
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 0.6875rem; /* 11sp */
+  color: var(--accent);
+  padding: 0.25rem 0.5rem 0;
+}
+/* Error text (12sp colorError) */
+.edit-error {
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 0.75rem; /* 12sp */
+  color: var(--error);
+  padding: 0.25rem 0.5rem 0;
+  max-height: 3.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+/* Empty state (centered, 15sp colorOnSurfaceVariant) */
+.edit-empty {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-2);
+  font-size: 0.9375rem; /* 15sp */
+  text-align: center;
+  padding: 2rem;
+  pointer-events: none;
+}
+
+/* ── Play screen (stage 7) — 1:1 with fragment_play.xml ── */
+/* Media viewport (colorSurfaceDim), layer bar (colorSurface), big play button
+   (Widget.Animastor.Button 56dp / radius 18dp), progress (4dp, outlineVariant
+   track / colorSecondary indicator), status (11sp onSurfaceVariant).
+   The fullscreen media container covers the screen via the Fullscreen API, so
+   the layerbar/meta/button below are naturally hidden (plus explicit rules for
+   robustness). */
+.page--play {
+  padding: 0;
+  overflow: hidden;
+  background: var(--surface-dim);
+}
+.play-media {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-dim);
+}
+/* All media layers fill the viewport; object-fit: contain = centerInside /
+   centerCrop for curtains (letterbox anchored to the fullscreen button). */
+.play-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.play-cover { z-index: 1; }
+.play-result { z-index: 1; }
+.play-video { z-index: 2; }
+
+/* Theater curtains fallback — the SAME asset Android ships
+   (res/drawable-nodpi/theater_curtains.png), copied to public/ (identical
+   md5). Rendered with centerCrop parity: background-size: cover. Shown only
+   while no cover is available (PlayFragment.showCurtains gate: no cover AND no
+   result/preview image). */
+.play-curtains {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image: url('/theater_curtains.png'); /* Android: scaleType centerCrop */
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* Dark scrim overlay for cinema letterbox effect (previewOverlay) */
+.play-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+  z-index: 3;
+}
+
+/* placeholderText — centered 15sp, color cinema_text_primary #F2E9DC (Android
+   fragment_play.xml: textSize 15sp, textColor @color/cinema_text_primary, no
+   background — text sits directly on the dark theater-curtains backdrop).
+   Fixed color (NOT var(--text)): the media viewport is the dark cinema
+   backdrop in BOTH themes, so the light-theme --text (#2C2418) would be
+   unreadable over it — Android uses the same single color everywhere. */
+.play-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #F2E9DC; /* cinema_text_primary */
+  font-size: var(--fs-body); /* 15sp — matches Android placeholderText */
+  text-align: center;
+  padding: 2rem;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* iuMissingOverlay — "Не сгенерировано", cinema_missing_bg, uppercase 14sp */
+.play-iu-missing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 4;
+  pointer-events: none;
+}
+.play-iu-missing span {
+  padding: 1rem 1.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--missing-bg);
+  color: var(--text);
+  font-size: 0.875rem; /* 14sp */
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Subtitle layer — current unit text (subtitle_background, white 16sp) */
+.play-subtitle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding: 0.875rem 1.5rem 1.25rem; /* 14/24/20dp */
+  background: var(--subtitle-bg);
+  color: #fff;
+  font-size: 1rem; /* 16sp */
+  line-height: 1.4;
+  text-align: center;
+  z-index: 4;
+}
+
+/* Fullscreen toggle — 44dp round, bg_player_control (#B3000000 + 33% white
+   stroke), anchored to the displayed image bounds via transform. */
+.play-fs {
+  position: absolute;
+  right: 0.875rem;  /* 14dp */
+  bottom: 0.875rem; /* 14dp */
+  width: 2.75rem;   /* 44dp */
+  height: 2.75rem;  /* 44dp */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.2);
+  background: rgba(0,0,0,.70);
+  color: #fff;
+  cursor: pointer;
+  z-index: 5;
+  will-change: transform;
+}
+
+/* Layer Controls — cinema console (Widget.Animastor.Chip.Layer: 48dp icon
+   chip, 1.5dp stroke, checked = colorSecondaryContainer + accent tint). */
+.play-layerbar {
+  display: flex;
+  gap: 0.5rem; /* 8dp */
+  padding: 0.625rem 0.75rem; /* 10dp 12dp */
+  background: var(--surface);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.play-layerbar::-webkit-scrollbar { display: none; }
+.chip--layer {
+  width: 3rem;   /* 48dp */
+  height: 3rem;  /* 48dp */
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--outline-2);
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+}
+.chip--layer--on {
+  background: var(--accent-container);
+  border-color: var(--accent);
+  color: var(--on-accent-container);
+}
+.chip--layer:active { transform: scale(.94); }
+
+/* Progress (LinearProgressIndicator 4dp) + status row */
+.play-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0 1rem;
+  min-height: 1.25rem;
+}
+.play-progress {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--outline-2);
+  overflow: hidden;
+  position: relative;
+}
+.play-progress__bar {
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  animation: play-indeterminate 1.2s ease-in-out infinite;
+  transform-origin: left;
+}
+@keyframes play-indeterminate {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(0%); }
+  100% { transform: translateX(100%); }
+}
+.play-status {
+  color: var(--text-2);
+  font-size: 0.6875rem; /* 11sp */
+  white-space: nowrap;
+}
+
+/* Big velvet play button — 56dp, radius 18dp, icon textStart */
+.play-btn {
+  height: 3.5rem; /* 56dp */
+  margin: 0 1rem 1.25rem 1rem; /* 16dp sides, 20dp bottom */
+  border-radius: var(--radius-md); /* 18dp */
+  border: 0;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 1rem; /* 16sp */
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+.play-btn:disabled { opacity: .4; cursor: default; }
+
+/* Fullscreen state (mostly covered by the Fullscreen API — the layerbar/meta/
+   button live outside the fullscreened media container) */
+.play-page--fs .play-layerbar,
+.play-page--fs .play-meta,
+.play-page--fs .play-btn { display: none; }
