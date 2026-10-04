@@ -54,11 +54,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Animastor/animastor.git",
+    "url": "git+https://github.com/Animastor/animastor-web.git",
     "directory": "packages/animastor-web-generator-vbook"
   },
-  "homepage": "https://github.com/Animastor/animastor/tree/main/packages/animastor-web-generator-vbook#readme",
+  "homepage": "https://github.com/Animastor/animastor-web/tree/main/packages/animastor-web-generator-vbook#readme",
   "bugs": {
-    "url": "https://github.com/Animastor/animastor/issues"
+    "url": "https://github.com/Animastor/animastor-web/issues"
   }
 }

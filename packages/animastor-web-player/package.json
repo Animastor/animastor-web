@@ -57,11 +57,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Animastor/animastor.git",
+    "url": "git+https://github.com/Animastor/animastor-web.git",
     "directory": "packages/animastor-web-player"
   },
-  "homepage": "https://github.com/Animastor/animastor/tree/main/packages/animastor-web-player#readme",
+  "homepage": "https://github.com/Animastor/animastor-web/tree/main/packages/animastor-web-player#readme",
   "bugs": {
-    "url": "https://github.com/Animastor/animastor/issues"
+    "url": "https://github.com/Animastor/animastor-web/issues"
   }
 }

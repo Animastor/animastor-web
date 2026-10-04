@@ -55,12 +55,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Animastor/animastor.git",
+    "url": "git+https://github.com/Animastor/animastor-web.git",
     "directory": "packages/animastor-web-local-ai"
   },
-  "homepage": "https://github.com/Animastor/animastor/tree/main/packages/animastor-web-local-ai#readme",
+  "homepage": "https://github.com/Animastor/animastor-web/tree/main/packages/animastor-web-local-ai#readme",
   "bugs": {
-    "url": "https://github.com/Animastor/animastor/issues"
+    "url": "https://github.com/Animastor/animastor-web/issues"
   },
   "dependencies": {
     "@animastor/web-settings": "^0.1.0"

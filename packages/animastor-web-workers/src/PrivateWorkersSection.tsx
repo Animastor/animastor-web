@@ -846,7 +846,7 @@ function InstallStep({ ports, created, method, mode, workflows, instructions, in
       {instructions?.availability && instructions.availability !== 'stable' && (
         <p class="card__hint card__hint--wrap">
           {ports.i18n.t('worker_setup_report_problem_hint')}{' '}
-          <a href="https://github.com/Animastor/animastor/issues" target="_blank" rel="noreferrer">
+          <a href="https://github.com/Animastor/animastor-web/issues" target="_blank" rel="noreferrer">
             {ports.i18n.t('worker_setup_report_problem')}
           </a>
         </p>
