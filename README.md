@@ -29,7 +29,7 @@ generation UI. It talks to the backend API and (through it) to the GPU worker po
 animastor-web/
 ├── frontends/
 │   ├── app/           # Responsive web app (Preact + Vite) — @animastor/app
-│   └── website/       # Public marketing website (animastor.in)
+│   └── website/       # Public marketing website (animastor.org)
 ├── packages/          # 13 npm packages (@animastor/web-*)
 ├── tools/
 │   ├── desktop-web-tester/   # Desktop layout/dev harness
