@@ -31,13 +31,12 @@ animastor-web/
 │   ├── app/           # Responsive web app (Preact + Vite) — @animastor/app
 │   └── website/       # Public marketing website (animastor.org)
 ├── packages/          # 13 npm packages (@animastor/web-*)
-├── tools/
-│   ├── desktop-web-tester/   # Desktop layout/dev harness
-│   └── mobile-web-tester/    # Mobile layout/dev harness
-├── docs/              # Frontend, migration, and architecture docs
 ├── ANDROID_WEB_PARITY.md
 └── app-web-rebuild.sh
 ```
+
+`tools/` (desktop/mobile WebView test harnesses) and `docs/` have moved to their
+own repositories — see below.
 
 ## Related repositories
 
@@ -47,6 +46,8 @@ Animastor is split into separate repositories:
 - [animastor-android](https://github.com/Animastor/animastor-android) — native Android client
 - [animastor-gpu-hub](https://github.com/Animastor/animastor-gpu-hub) — GPU task dispatcher
 - [animastor-worker](https://github.com/Animastor/animastor-worker) — GPU workers (ComfyUI)
+- [animastor-docs](https://github.com/Animastor/animastor-docs) — project documentation (was `docs/` here)
+- [animastor-tools](https://github.com/Animastor/animastor-tools) — desktop/mobile web testers (was `tools/` here)
 
 ## Quick start
 
@@ -67,7 +68,8 @@ npm run typecheck        # tsc --noEmit
 
 ## Documentation
 
-See [`docs/`](docs/) for frontend, migration, and module architecture notes.
+Documentation now lives in [animastor-docs](https://github.com/Animastor/animastor-docs)
+(was `docs/` in this repository; production portal: `https://animastor.org/docs/`).
 
 ## License
 
