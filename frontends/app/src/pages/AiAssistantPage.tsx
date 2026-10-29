@@ -13,6 +13,7 @@ import { Modal, toast } from '../lib/ui';
 import { IconMic, IconMicOff, IconSend, IconMenu, IconAdd, IconSparkle, IconDownload, IconEdit, IconMap, IconFile, IconCheck, IconCopy, IconClose, IconStop } from '../app/icons';
 import type { IconProps } from '../app/icons';
 import { sourceBadgeKey, streamErrorKey, isUserCancelled } from '@animastor/web-ai-chat';
+import { resolveStreamOutcome, type StreamErrorFrame } from '../features/aiChat/streamOutcome';
 
 // AiAssistantPage — 1:1 with AiAssistantFragment. Chat with AI: session history
 // (/ai/sessions), mode chips (AssistantMode), typing indicator, position context
@@ -283,6 +284,26 @@ export function AiAssistantPage(props: { path?: string; embedded?: boolean; onCl
       setMessages((prev) => [...prev, { id: assistantId!, text: '', isUser: false, streaming: true, source: source ?? null }]);
       setTyping(false);
     };
+    // Honest error states — shared by a thrown ApiError/network error and an
+    // SSE `event: error` frame: known backend codes map to localized strings,
+    // everything else shows the sanitized backend message.
+    const showFailure = (code: string | undefined, message: string) => {
+      const known = streamErrorKey(code);
+      const msg = known ? t(known as StrKey) : tf('ai_error', message || 'stream failed');
+      if (assistantId != null) {
+        // Mid-stream failure: the partial answer stays visible, the error
+        // note is appended below it (nothing is lost, nothing hangs).
+        setMessages((prev) => prev.map((m) => (m.id === assistantId
+          ? { ...m, streaming: false, failed: true, text: m.text ? `${m.text}\n\n${msg}` : msg }
+          : m)));
+        if (streamedText) {
+          apiMessagesRef.current = [...apiMessagesRef.current, { role: 'assistant', content: streamedText }];
+        }
+      } else {
+        setMessages((prev) => [...prev, { id: nextId++, text: msg, isUser: false, failed: true }]);
+      }
+    };
+    let errorFrame: StreamErrorFrame | null = null;
 
     try {
       await postChatStream('/ai/chat/stream', {
@@ -308,8 +329,20 @@ export function AiAssistantPage(props: { path?: string; embedded?: boolean; onCl
           scrollToBottom();
         },
         onDone: (data) => { donePayload = data; },
-        onError: () => { /* handled via the promise result below */ },
+        // The stream still runs to EOF after an error frame — remember it and
+        // resolve the outcome below, so the turn is never shown as a success.
+        onError: (e) => { errorFrame = e; },
       }, controller.signal);
+
+      const outcome = resolveStreamOutcome<AiChatResponse>({
+        donePayload: donePayload as unknown as AiChatResponse | null,
+        errorFrame,
+        streamedText,
+      });
+      if (outcome.kind === 'failed') {
+        showFailure(outcome.code, outcome.message);
+        return;
+      }
 
       // Discard the response if the user switched sessions while waiting
       // (1:1 with Android: sessionAtSend != null && currentSessionId != sessionAtSend).
@@ -317,7 +350,7 @@ export function AiAssistantPage(props: { path?: string; embedded?: boolean; onCl
         return;
       }
 
-      const res = donePayload as unknown as AiChatResponse | null;
+      const res = outcome.res;
       if (assistantId == null) {
         // No deltas and no terminal — an empty completion. Honest no-result.
         ensureBubble((res as { ai_source?: string } | null)?.ai_source ?? null);
@@ -350,24 +383,7 @@ export function AiAssistantPage(props: { path?: string; embedded?: boolean; onCl
           setMessages((prev) => [...prev, { id: nextId++, text: t('ai_cancelled'), isUser: false, cancelled: true }]);
         }
       } else {
-        // Honest error states: known backend codes map to localized strings,
-        // everything else shows the sanitized backend message.
-        const err = e as Error;
-        const code = e instanceof ApiError ? e.code : undefined;
-        const known = streamErrorKey(code);
-        const msg = known ? t(known as StrKey) : tf('ai_error', err.message || 'stream failed');
-        if (assistantId != null) {
-          // Mid-stream failure: the partial answer stays visible, the error
-          // note is appended below it (nothing is lost, nothing hangs).
-          setMessages((prev) => prev.map((m) => (m.id === assistantId
-            ? { ...m, streaming: false, failed: true, text: m.text ? `${m.text}\n\n${msg}` : msg }
-            : m)));
-          if (streamedText) {
-            apiMessagesRef.current = [...apiMessagesRef.current, { role: 'assistant', content: streamedText }];
-          }
-        } else {
-          setMessages((prev) => [...prev, { id: nextId++, text: msg, isUser: false, failed: true }]);
-        }
+        showFailure(e instanceof ApiError ? e.code : undefined, (e as Error).message);
       }
     } finally {
       abortRef.current = null;
