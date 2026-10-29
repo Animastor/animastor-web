@@ -14,6 +14,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as generateStore from './generateStore';
 import * as fileStore from './fileStore';
 import { position } from './positionStore';
+import { resolveLanguage } from '../app/theme';
 import type * as client from '../api/client';
 
 const BOOK_KEY = 'animastor:currentBook';
@@ -259,7 +260,7 @@ describe('createBlankBook', () => {
     const id = await fileStore.createBlankBook();
 
     expect(id).toBe('new-1');
-    expect(postJson).toHaveBeenCalledWith('/book/blank', { title: 'Новая книга' });
+    expect(postJson).toHaveBeenCalledWith('/book/blank', { language: resolveLanguage() });
     expect(generateStore.bookId.value).toBe('new-1');
     expect(generateStore.phase.value).toBe('SCENE_READY');
     expect(generateStore.blankBookJustCreated.value).toBe(true);

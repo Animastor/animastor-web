@@ -54,6 +54,7 @@ import type {
 import { sceneRefs } from '../api/models';
 import type { SceneRef } from '../api/models';
 import { navigateTo, clearPosition } from './positionStore';
+import { resolveLanguage } from '../app/theme';
 import { readPersistedBookSession } from '@animastor/web-book-session';
 
 /** File-local structural mirror of the shared phase union (host adapter
@@ -344,7 +345,7 @@ export async function createBlankBook(): Promise<string | null> {
   const { session } = seams();
   beginBookTransition();
   try {
-    const res = await postJson<{ book_id: string }>('/book/blank', { title: 'Новая книга' });
+    const res = await postJson<{ book_id: string }>('/book/blank', { language: resolveLanguage() });
     const bId = res.book_id;
     session.loadBook(bId, '');
     const bookData = await getJson<BookData>(`/book/${encodeURIComponent(bId)}`);
