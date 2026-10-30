@@ -237,6 +237,35 @@ export function installerSha256(instructions: SetupInstructions | null, method: 
   return instructions?.installer?.sha256 ?? method?.installer?.sha256 ?? null;
 }
 
+/** Linux one-command install: `curl -fsSL "<url>" | bash`.
+ *  The URL is ALWAYS double-quoted — it carries `&`-separated query
+ *  parameters (profile/mode/platform); unquoted, the shell runs the part
+ *  before `&` in the background and the rest of the query is lost (the
+ *  2026-10-30 E2E run fell back to Mode: managed that way). A URL that could
+ *  break out of the quotes yields null (no command rather than an unsafe one). */
+export function bootstrapOneLiner(url: string | null): string | null {
+  if (!url || /["`$\\\s]/.test(url)) return null;
+  return `curl -fsSL "${url}" | bash`;
+}
+
+/** Instruction steps as rendered: the legacy two-step Linux bootstrap
+ *  (download-bootstrap `curl -fsSL -o animastor-installer.sh <url>` +
+ *  run-bootstrap `bash animastor-installer.sh`, served by backends with the
+ *  old Setup Contract) is merged into ONE run-bootstrap step with the quoted
+ *  one-liner. Steps of the new contract (already one quoted command), the
+ *  Windows/PowerShell flow and the isolated bundle flow pass through as-is. */
+export function normalizeInstallSteps(steps: SetupInstructionStep[]): SetupInstructionStep[] {
+  const download = steps.find((s) => s.id === 'download-bootstrap');
+  const run = steps.find((s) => s.id === 'run-bootstrap');
+  const m = download?.code ? /^curl -fsSL -o animastor-installer\.sh (\S+)$/.exec(download.code.trim()) : null;
+  if (!download || !run || !m || (run.code ?? '').trim() !== 'bash animastor-installer.sh') return steps;
+  const code = bootstrapOneLiner(m[1]);
+  if (!code) return steps;
+  return steps
+    .filter((s) => s.id !== 'download-bootstrap')
+    .map((s) => (s.id === 'run-bootstrap' ? { ...s, code } : s));
+}
+
 /** Group profiles for the Setup Center cards: one card per worker type,
  *  first profile of the type is the recommended one (manifest order). */
 export function groupProfilesByType(profiles: SetupProfile[]): {

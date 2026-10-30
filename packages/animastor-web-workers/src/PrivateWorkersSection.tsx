@@ -34,7 +34,7 @@ import {
   groupProfilesByType, deploymentOptions, pickMethod,
   linuxModeAvailability,
   setupStatusKey, setupStatusClass, initialWizardState, canGoNext,
-  nextStep, prevStep, stepTitleKey, stepBodyKey, formatDiskBudget,
+  nextStep, prevStep, stepTitleKey, stepBodyKey, formatDiskBudget, normalizeInstallSteps,
 } from './workerSetup';
 
 export function PrivateWorkersSection({ ports }: { ports: WorkerPorts }) {
@@ -807,7 +807,7 @@ function InstallStep({ ports, created, method, mode, workflows, instructions, in
       <p class="card__label">{ports.i18n.t('worker_setup_instructions_title')}</p>
       {instructions ? (
         <ol class="worker__steps">
-          {instructions.steps.map((s) => (
+          {normalizeInstallSteps(instructions.steps).map((s) => (
             <li key={s.id}>
               <strong>{ports.i18n.t((stepTitleKey(s.id) ?? '') as WorkerI18nKey, s.title)}</strong>
               <div>{ports.i18n.t((stepBodyKey(s.id) ?? '') as WorkerI18nKey, s.body)}</div>

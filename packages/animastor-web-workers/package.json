@@ -1,6 +1,6 @@
 {
   "name": "@animastor/web-workers",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Private Worker Management UI for Animastor web frontend — worker CRUD, setup wizard, sharing V2, and notification adapter. Host capabilities (api, i18n, ui, auth, icons) arrive via the injected WorkerPorts contract; the package never imports host stores, api/client, or app-level UI directly.",
   "keywords": [
     "animastor",
