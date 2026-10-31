@@ -1,6 +1,6 @@
 {
   "name": "@animastor/web-generator",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Generation-progress domain slice for Animastor web frontend — the pure/near-pure analysis state machine, progress panel rows, SSE event routing, and generation timer. Host capabilities (identity, transport, phase, auth, i18n, navigation) arrive via the injected ProgressRowContext and ProgressEventSink contracts; the package never imports host stores, api/client, app-level UI, or signals. Package-free domain logic extracted from the generation-progress contour.",
   "keywords": [
     "animastor",

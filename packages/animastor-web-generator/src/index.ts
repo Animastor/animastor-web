@@ -54,6 +54,16 @@ export type {
   TaskRow,
 } from './progressRows';
 
+// ── Task status (Stage 155: command-only generation) ──
+export {
+  blockedWorkerType,
+  commandWorkerType,
+  isStoppedState,
+  retryCommandFor,
+  taskRowState,
+} from './taskStatus';
+export type { GpuWorkerType, RetryCommand, TaskRowState, TaskStatusFields } from './taskStatus';
+
 // ── Timer ──
 export {
   createGenerationTimer,

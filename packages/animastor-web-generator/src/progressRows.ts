@@ -17,6 +17,8 @@
 import type { ProgressPanelResponse, ProgressTask } from './models';
 import type { VBookProgress, VBookStage } from './vbookProgress';
 import type { GenerationTimerState } from './timer';
+import { blockedWorkerType, isStoppedState, taskRowState } from './taskStatus';
+import type { GpuWorkerType, TaskRowState } from './taskStatus';
 
 // Row display window for done rows (Android COMPLETED_TASK_DISPLAY_MS).
 const COMPLETED_TASK_DISPLAY_MS = 10_000;
@@ -117,6 +119,12 @@ export interface TaskRow {
   countText: string | null;
   indeterminate: boolean;
   cancelled: boolean;
+  /** Display state (Stage 155): active / done / cancelled / blocked /
+   *  interrupted. blocked and interrupted rows are stopped — no spinner, no
+   *  timer, they wait for a new command. */
+  state: TaskRowState;
+  /** The missing worker type of a blocked row (from blocked_reason). */
+  blockedType: GpuWorkerType | null;
   /** Frozen elapsed (done) vs live (active): -1 live, >= 0 frozen. */
   elapsedSeconds: number;
   /** true when elapsedSeconds is frozen at completion (Android row.tag >= 0). */
@@ -184,6 +192,8 @@ export function computeProgressRows(
   if (tracking.newGenerationPending) {
     const hasVBook = vbookProg != null &&
       (vbookProg.stage === 'ANALYZING' || vbookProg.stage === 'CREATING_SCENES');
+    // A blocked/interrupted row is the visible outcome of a command (e.g. the
+    // new command was blocked at once — no worker), so it opens the gate too.
     const hasGpuActivity = panel?.tasks?.some((t) => !t.done && !t.cancelled && t.visible) === true;
     if (hasVBook || hasGpuActivity) {
       tracking.generationCompleted = false;
@@ -199,13 +209,17 @@ export function computeProgressRows(
   const rows: TaskRow[] = [];
 
   const addFromServer = (sw: ProgressTask, label: string) => {
-    if (sw.total <= 0) return;
+    const preState = taskRowState(sw);
+    const stopped = isStoppedState(preState);
+    // A stopped command stays visible even without countable units.
+    if (sw.total <= 0 && !stopped) return;
     // Per-ROW key: sibling rows of one task (per-target rows) keep their own
     // floor and their own 10s done-window — a fast sibling can never expire a
     // still-running one, and ready counts never cross-pollute.
     const taskKey = rowTaskKey(sw.task_id ?? null, sw.type, sw.chapter_id ?? null, sw.scene_id ?? null);
     const ready = Math.max(sw.ready, tracking.taskReadyFloor.get(taskKey) ?? 0);
-    const done = sw.done || (ready >= sw.total && ready > 0);
+    const done = !stopped && preState !== 'cancelled' && (sw.done || (ready >= sw.total && ready > 0));
+    const state = taskRowState(sw, done);
     // STALE-DONE GATE — the backend keeps recently-completed tasks in the panel
     // for ~30s (TERMINAL_RETENTION_MS) and can report a task whose assets are all
     // ready as done. On page open these done rows from a PREVIOUS generation must
@@ -243,8 +257,10 @@ export function computeProgressRows(
       percent: done ? 100 : sw.percent,
       done,
       countText: null,
-      indeterminate: sw.indeterminate,
+      indeterminate: stopped ? false : sw.indeterminate,
       cancelled: sw.cancelled,
+      state,
+      blockedType: state === 'blocked' ? blockedWorkerType(sw.blocked_reason, sw.type) : null,
       elapsedSeconds,
       frozen: done,
     });
@@ -283,7 +299,7 @@ export function computeProgressRows(
         chapterId: null, sceneId: null, sceneLabel: null, chapterLabel: null,
         endSceneLabel: null, endChapterLabel: null,
         ready: finalReady, total: finalTotal, percent: 100, done: true, countText: null,
-        indeterminate: false, cancelled: false,
+        indeterminate: false, cancelled: false, state: 'done', blockedType: null,
         elapsedSeconds: tracking.taskFrozenElapsed.get(rowTaskKey('vbook', 'vbook', null, null)) ?? vbookElapsed, frozen: true,
       });
     } else {
@@ -309,7 +325,7 @@ export function computeProgressRows(
         chapterId: null, sceneId: null, sceneLabel: null, chapterLabel: null,
         endSceneLabel: null, endChapterLabel: null,
         ready, total, percent: pct, done: false, countText, indeterminate,
-        cancelled: false, elapsedSeconds: vbookElapsed, frozen: false,
+        cancelled: false, state: 'active', blockedType: null, elapsedSeconds: vbookElapsed, frozen: false,
       });
     }
   }
@@ -362,8 +378,9 @@ export function computeProgressRows(
     return { kind: 'hidden' };
   }
 
-  // Check if any worker is still active (non-done, non-cancelled)
-  const anyActive = rows.some((r) => !r.done && !r.cancelled);
+  // Check if any worker is still active (non-done, non-cancelled, not stopped:
+  // a blocked/interrupted row waits for a new command — nothing is running)
+  const anyActive = rows.some((r) => r.state === 'active');
   if (!anyActive) {
     // All remaining workers done but still within the 10s display window
     return { kind: 'rows', rows };

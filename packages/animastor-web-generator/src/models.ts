@@ -36,6 +36,16 @@ export interface ProgressTask {
   visible: boolean;
   indeterminate: boolean;
   cancelled: boolean;
+  /** Stage 155 (command-only generation): registry task status —
+   *  'active' | 'completed' | 'cancelled' | 'blocked' | 'interrupted'.
+   *  Absent on older backends. */
+  status?: string | null;
+  /** No live worker of the type — the command is blocked (no auto-retry). */
+  blocked?: boolean;
+  /** 'no_worker:<type>' when blocked, else null. */
+  blocked_reason?: string | null;
+  /** Interrupted by a backend restart — resumed only by a new command. */
+  interrupted?: boolean;
 }
 
 /** SSE /book/{id}/progress-stream — ProgressEvent (api/models.ts:701).

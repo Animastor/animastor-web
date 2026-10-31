@@ -361,3 +361,72 @@ describe('tracking state helpers', () => {
     expect(hasAnyProgress(tracking)).toBe(true);
   });
 });
+
+describe('computeProgressRows — Stage 155 stopped commands (command-only generation)', () => {
+  it('blocked row: visible, not running, no spinner, carries the missing worker type', () => {
+    const h = harness();
+    const state = computeProgressRows(h.ctx, panel([task({
+      type: 'audio', status: 'blocked', blocked: true, blocked_reason: 'no_worker:audio', indeterminate: true,
+    })], false), null, LABELS);
+    expect(state.kind).toBe('rows');
+    if (state.kind !== 'rows') return;
+    expect(state.rows[0].state).toBe('blocked');
+    expect(state.rows[0].blockedType).toBe('audio');
+    expect(state.rows[0].done).toBe(false);
+    expect(state.rows[0].indeterminate).toBe(false);
+    expect(h.effects.regenerating).not.toContain(true);
+    expect(h.effects.finalized).toBe(0);
+  });
+
+  it('interrupted row with no countable units still shows (total 0)', () => {
+    const h = harness();
+    const state = computeProgressRows(h.ctx, panel([task({ status: 'interrupted', interrupted: true, total: 0 })], false), null, LABELS);
+    expect(state.kind).toBe('rows');
+    if (state.kind !== 'rows') return;
+    expect(state.rows[0].state).toBe('interrupted');
+    expect(state.rows[0].blockedType).toBe(null);
+  });
+
+  it('a blocked row never becomes done, never expires by the done window', () => {
+    const h = harness();
+    startGenerationTimer(h.ctx.timer, NOW - 1_000);
+    const blocked = task({ status: 'blocked', blocked: true, blocked_reason: 'no_worker:image', ready: 5, total: 5 });
+    computeProgressRows(h.ctx, panel([blocked], false), null, LABELS);
+    h.ctx.now = NOW + 60_000;
+    const later = computeProgressRows(h.ctx, panel([blocked], false), null, LABELS);
+    expect(later.kind).toBe('rows');
+    if (later.kind !== 'rows') return;
+    expect(later.rows[0].state).toBe('blocked');
+    expect(later.rows[0].done).toBe(false);
+    expect(h.effects.finalized).toBe(0);
+  });
+
+  it('a running row next to a blocked one keeps the session regenerating', () => {
+    const h = harness();
+    computeProgressRows(h.ctx, panel([
+      task({ task_id: 'a', type: 'audio', ready: 1, total: 5 }),
+      task({ task_id: 'b', type: 'image', status: 'blocked', blocked: true, blocked_reason: 'no_worker:image' }),
+    ]), null, LABELS);
+    expect(h.effects.regenerating).toEqual([true]);
+  });
+
+  it('cancelled row keeps state cancelled (shown as cancelled, never as done)', () => {
+    const h = harness();
+    const state = computeProgressRows(h.ctx, panel([
+      task({ task_id: 'a', type: 'audio', ready: 1, total: 5 }),
+      task({ task_id: 'b', type: 'image', status: 'cancelled', cancelled: true, ready: 5, total: 5 }),
+    ]), null, LABELS);
+    if (state.kind !== 'rows') throw new Error('rows expected');
+    const c = state.rows.find((r) => r.taskId === 'b')!;
+    expect(c.state).toBe('cancelled');
+    expect(c.done).toBe(false);
+  });
+
+  it('a blocked result of a new command opens the new-generation gate', () => {
+    const h = harness();
+    h.ctx.tracking.newGenerationPending = true;
+    const state = computeProgressRows(h.ctx, panel([task({ status: 'blocked', blocked: true, blocked_reason: 'no_worker:audio', type: 'audio' })], false), null, LABELS);
+    expect(state.kind).toBe('rows');
+    expect(h.ctx.tracking.newGenerationPending).toBe(false);
+  });
+});
