@@ -18,7 +18,7 @@
     "@animastor/web-book-session": "^0.1.0",
     "@animastor/web-editor": "^0.1.0",
     "@animastor/web-file": "^0.1.0",
-    "@animastor/web-generator": "^0.1.0",
+    "@animastor/web-generator": "^0.2.0",
     "@animastor/web-generator-config": "^0.1.0",
     "@animastor/web-generator-sse": "^0.1.0",
     "@animastor/web-generator-vbook": "^0.1.0",
