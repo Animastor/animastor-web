@@ -15,10 +15,14 @@ const BLOB_TIMEOUT_MS = 120_000;   // large media downloads
 export class ApiError extends Error {
   status: number;
   code?: string;
-  constructor(message: string, status: number, code?: string) {
+  /** Parsed JSON error body, when the server sent one (e.g. the Stage 155
+   *  /regenerate 409 `{ error: 'layer_disabled', disabled_worker_types }`). */
+  body?: unknown;
+  constructor(message: string, status: number, code?: string, body?: unknown) {
     super(message);
     this.status = status;
     this.code = code;
+    this.body = body;
     this.name = 'ApiError';
   }
 }
@@ -55,8 +59,9 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs: numbe
     });
     if (!res.ok) {
       let msg = res.statusText;
-      try { const j = await res.json(); msg = (j as any)?.error || (j as any)?.message || msg; } catch { /* ignore */ }
-      throw new ApiError(msg, res.status);
+      let body: unknown;
+      try { body = await res.json(); msg = (body as any)?.error || (body as any)?.message || msg; } catch { /* ignore */ }
+      throw new ApiError(msg, res.status, undefined, body);
     }
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;

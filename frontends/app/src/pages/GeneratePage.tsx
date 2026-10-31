@@ -10,7 +10,7 @@ import {
   bookId, phase, vbookProgress, isRegenerating,
   audioEnabled, imageEnabled, videoEnabled, vbookEnabled,
   setAudioEnabled, setImageEnabled, setVideoEnabled, setVBookEnabled,
-  startGeneration, startVBookGeneration, cancelGeneration, cancelTask,
+  startGeneration, startVBookGeneration, cancelGeneration, cancelTask, retryStoppedTask,
   checkAndRestoreGenerationState, checkVBookAgentStatus, computeProgressRows,
   resetGenerationStatus, onPlaybackPrepared,
   liveElapsedSeconds, formatTimerText,
@@ -275,7 +275,8 @@ export function GeneratePage(props: { path?: string }) {
   // Active-jobs summary for the desktop header (plan §6): rows that are still
   // running (not done / not cancelled). VBook work appears as rows too, so a
   // single count covers all four worker sections.
-  const runningRows = panel.kind === 'rows' ? panel.rows.filter((r) => !r.done && !r.cancelled) : [];
+  // Stage 155: blocked / interrupted rows are stopped, not running.
+  const runningRows = panel.kind === 'rows' ? panel.rows.filter((r) => r.state === 'active') : [];
   const runningCount = runningRows.length;
   // isGenerating covers the poll gap after start (up to 1.5s) and the vbook
   // green COMPLETED-row display window (isRegenerating stays true for 10s) —
@@ -429,7 +430,7 @@ export function GeneratePage(props: { path?: string }) {
               void (async () => {
                 const res = await startGeneration({ workerTypes: [scopeFor], scope, chapterId: chId, sceneId: scId });
                 if (res.ok) toast(tf('generate_started_layer', t(scopeFor === 'audio' ? 'progress_label_audio' : scopeFor === 'image' ? 'progress_label_image' : 'progress_label_video')));
-                else toast(tf('generate_start_failed', res.message));
+                else toast(res.code === 'layer_disabled' ? res.message : tf('generate_start_failed', res.message));
               })();
             }
           }}
@@ -539,12 +540,33 @@ function WorkerRow({ row, onStop }: { row: TaskRow; onStop: () => void }) {
   // (GPU workers have no server countText → shows the ready/total chunk counter,
   // e.g. "2/5" — same format as progress_vbook_scenes). Hidden for indeterminate.
   const countText = row.countText ?? (row.total > 0 ? `${row.ready}/${row.total}` : null);
-  if (row.cancelled) {
+  // Stage 155 — a cancelled command: «Отменено», no buttons; it leaves the
+  // panel by the existing finished-task logic.
+  if (row.state === 'cancelled' || row.cancelled) {
     return (
       <div class="gen-row">
         <span class="gen-row__name gen-row__name--cancelled">
-          {t('generation_done')} — {name}
+          {t('task_cancelled')} — {name}
         </span>
+      </div>
+    );
+  }
+  // Stage 155 — a stopped command (no live worker / backend restart): no
+  // spinner, no timer; only an explicit new command restarts it.
+  if (row.state === 'blocked' || row.state === 'interrupted') {
+    const blocked = row.state === 'blocked';
+    const status = blocked
+      ? tf('task_blocked_no_worker', t(row.blockedType === 'audio' ? 'worker_type_audio'
+        : row.blockedType === 'video' ? 'worker_type_video' : 'worker_type_image'))
+      : t('task_interrupted');
+    return (
+      <div class="gen-row gen-row--stopped">
+        <div class="gen-row__line">
+          <span class="gen-row__name gen-row__name--stopped">{status} — {name}</span>
+          <button class="btn gen-row__retry" onClick={() => { void onRetry(row); }}>
+            {blocked ? t('task_retry') : t('task_continue')}
+          </button>
+        </div>
       </div>
     );
   }
@@ -591,6 +613,16 @@ function WorkerRow({ row, onStop }: { row: TaskRow; onStop: () => void }) {
       </div>
     </div>
   );
+}
+
+// Stage 155 — «Повторить» / «Продолжить»: a NEW explicit /regenerate with the
+// row's worker type and scope (never automatic).
+async function onRetry(row: TaskRow): Promise<void> {
+  const res = await retryStoppedTask(row);
+  if (!res) return;
+  const typeLabel = t(row.type === 'audio' ? 'progress_label_audio' : row.type === 'video' ? 'progress_label_video' : 'progress_label_image');
+  if (res.ok) toast(tf('generate_started_layer', typeLabel));
+  else toast(res.code === 'layer_disabled' ? res.message : tf('generate_start_failed', res.message));
 }
 
 // showSingleDoneRow — one green Done row across all section containers.

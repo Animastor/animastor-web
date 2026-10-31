@@ -1606,6 +1606,11 @@ button { font: inherit; color: inherit; }
 }
 .gen-row__name--done { color: var(--success); }
 .gen-row__name--cancelled { color: var(--error); }
+/* Stage 155 — stopped command (no worker / interrupted): neutral, no spinner */
+.gen-row__name--stopped { color: var(--text-2); }
+.gen-row__retry {
+  flex-shrink: 0; min-height: 2rem; padding: 0 0.75rem; font-size: 0.8125rem;
+}
 .gen-row__count { font-size: 0.75rem; color: var(--text-2); flex-shrink: 0; }
 .gen-row__count--done { color: var(--success); }
 .gen-row__pct {

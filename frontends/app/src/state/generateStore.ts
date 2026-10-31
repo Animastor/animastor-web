@@ -35,7 +35,8 @@ import {
 import { sceneRefs } from '../api/models';
 import type { SceneRef } from '../api/models';
 import { navigateTo, position } from './positionStore';
-import { vbookStageLabel } from '../app/i18n';
+import { t, tf, vbookStageLabel } from '../app/i18n';
+import { classifyStartError, layerLabels } from '../features/generation/commandErrors';
 // ── Identity contour (owned by @animastor/web-book-session — re-exported 1:1) ──
 // Single source of truth for book identity; this module is only a
 // consumption/re-export surface so existing consumer imports keep resolving.
@@ -52,7 +53,7 @@ import {
   applyAnalysisEvent, analysisOverallPercent as analysisOverallPercentDomain,
   computeProgressRows as computeProgressRowsDomain, createGenerationTimer, createIdleVBookProgress,
   createInitialAnalysisProgress, createProgressTrackingState, elapsedSeconds, formatTimerText,
-  hasAnyProgress as hasAnyProgressDomain, resetProgressTracking,
+  hasAnyProgress as hasAnyProgressDomain, resetProgressTracking, retryCommandFor,
   startGenerationTimer, stopGenerationTimer,
 } from '@animastor/web-generator';
 import {
@@ -571,7 +572,7 @@ export interface GenerationRequest {
 }
 export type GenerationResult =
   | { ok: true; dirty: number; scope: string }
-  | { ok: false; message: string };
+  | { ok: false; message: string; code?: 'layer_disabled' };
 
 export async function startGeneration(req: GenerationRequest): Promise<GenerationResult> {
   const bId = bookId.value;
@@ -596,9 +597,34 @@ export async function startGeneration(req: GenerationRequest): Promise<Generatio
     void refreshAssetsState();
     return { ok: true, dirty, scope: res.scope ?? req.scope };
   } catch (e) {
+    // Stage 155: 409 layer_disabled — the server created no task (every
+    // requested layer is switched off). Nothing runs, so the session is not
+    // left "regenerating"; the user gets an explicit "turn the layer on".
+    const err = classifyStartError(e, req.workerTypes);
+    if (err.kind === 'layer_disabled') {
+      isRegenerating.value = false;
+      progressTracking.newGenerationPending = false;
+      setGenerationStatus('IDLE');
+      const labels = layerLabels(err.workerTypes, (type) =>
+        type === 'audio' ? t('progress_label_audio') : type === 'image' ? t('progress_label_image')
+          : type === 'video' ? t('progress_label_video') : type);
+      return { ok: false, code: 'layer_disabled', message: tf('generate_layer_disabled', labels) };
+    }
     setGenerationStatus('ERROR');
-    return { ok: false, message: (e as Error).message };
+    return { ok: false, message: err.message };
   }
+}
+
+/**
+ * Stage 155 — «Повторить» / «Продолжить» for a blocked / interrupted task row.
+ * Never automatic: the user presses the button and a NEW explicit /regenerate
+ * command with the same worker type and scope is sent (the backend supersedes
+ * the stopped task). Returns null when the row has nothing to repeat.
+ */
+export async function retryStoppedTask(row: TaskRow): Promise<GenerationResult | null> {
+  const cmd = retryCommandFor(row);
+  if (!cmd) return null;
+  return startGeneration(cmd);
 }
 
 /**
