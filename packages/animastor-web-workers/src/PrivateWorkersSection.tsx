@@ -34,7 +34,7 @@ import {
   groupProfilesByType, deploymentOptions, pickMethod,
   linuxModeAvailability,
   setupStatusKey, setupStatusClass, initialWizardState, canGoNext,
-  nextStep, prevStep, stepTitleKey, stepBodyKey, formatDiskBudget, normalizeInstallSteps,
+  nextStep, prevStep, stepTitleKey, stepBodyKey, formatDiskBudget, maskSecret,
 } from './workerSetup';
 
 export function PrivateWorkersSection({ ports }: { ports: WorkerPorts }) {
@@ -690,6 +690,30 @@ function SetupWizard({ ports, onClose }: { ports: WorkerPorts; onClose: () => vo
 // bootstrap — nothing is typed. The worker is ALWAYS created before this
 // step (wizard 'create') — there is no "create a worker" instruction.
 // ─────────────────────────────────────────────────────────────────────────
+/** A command block with a one-tap copy button — the one-liner is meant to be
+ *  pasted on the GPU machine, never retyped (web + Android parity). */
+function CopyableCode({ ports, text }: { ports: WorkerPorts; text: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch (_) {
+      ports.ui.toast(ports.i18n.t('worker_copy_failed'));
+    }
+  }, [text]);
+
+  return (
+    <>
+      <pre class="settings__debug worker__env">{text}</pre>
+      <button class="btn btn--outlined" onClick={() => void onCopy()}>
+        {copied ? ports.i18n.t('worker_copied') : ports.i18n.t('worker_copy')}
+      </button>
+    </>
+  );
+}
+
 function InstallStep({ ports, created, method, mode, workflows, instructions, instructionsFailed, copied, onCopyKey }: {
   ports: WorkerPorts;
   created: { token: string; worker: PrivateWorker };
@@ -711,6 +735,14 @@ function InstallStep({ ports, created, method, mode, workflows, instructions, in
   const bundleUrl = resolveArtifactUrl(bundle?.download_url ?? null);
   // Existing ComfyUI without the installer: the runtime bundle is THE artifact.
   const bundlePrimary = mode === 'existing' && !!bundle?.available && !installerUrl;
+  // The Worker Key is a one-time secret shown next to its copy button; it is
+  // masked by default (shoulder-surfing / screen sharing) and revealed only
+  // on an explicit tap. Nothing about this state is persisted.
+  const [keyShown, setKeyShown] = useState(false);
+  const workerTypeLabel = ports.i18n.t(
+    (created.worker.worker_type === 'audio' ? 'layer_audio'
+      : created.worker.worker_type === 'image' ? 'layer_image' : 'layer_video') as WorkerI18nKey,
+  );
 
   return (
     <div class="setup__step setup__install">
@@ -721,11 +753,24 @@ function InstallStep({ ports, created, method, mode, workflows, instructions, in
         <p class="modal__notice setup__notice">{instructions.notice}</p>
       )}
 
+      {/* The worker this installation belongs to: name, type and the status
+          the backend derives from the hub (Offline until the first
+          heartbeat, then Online). Facts only — nothing invented locally. */}
+      <p class="card__label">{ports.i18n.tf('worker_setup_worker_line', created.worker.name, workerTypeLabel)}</p>
+      <span class={'worker__status ' + setupStatusClass(created.worker.status)}>
+        {ports.i18n.t(setupStatusKey(created.worker.status) as WorkerI18nKey)}
+      </span>
+
       {/* One-time Worker Key (existing secure lifecycle — Phase 3.1 §14) */}
       <p class="modal__notice worker__warn">{ports.i18n.t('worker_credential_warning')}</p>
       <p class="card__label">{ports.i18n.t('worker_setup_key_title')}</p>
       <div class="worker__cred">
-        <code class="worker__token">{created.token}</code>
+        <code class="worker__token">
+          {keyShown ? created.token : maskSecret(created.token)}
+        </code>
+        <button class="btn btn--outlined" onClick={() => setKeyShown((v) => !v)}>
+          {ports.i18n.t(keyShown ? 'worker_setup_key_hide' : 'worker_setup_key_show')}
+        </button>
         <button class="btn btn--outlined" onClick={onCopyKey}>
           {copied ? ports.i18n.t('worker_copied') : ports.i18n.t('worker_copy')}
         </button>
@@ -807,11 +852,11 @@ function InstallStep({ ports, created, method, mode, workflows, instructions, in
       <p class="card__label">{ports.i18n.t('worker_setup_instructions_title')}</p>
       {instructions ? (
         <ol class="worker__steps">
-          {normalizeInstallSteps(instructions.steps).map((s) => (
+          {instructions.steps.map((s) => (
             <li key={s.id}>
               <strong>{ports.i18n.t((stepTitleKey(s.id) ?? '') as WorkerI18nKey, s.title)}</strong>
               <div>{ports.i18n.t((stepBodyKey(s.id) ?? '') as WorkerI18nKey, s.body)}</div>
-              {s.code && <pre class="settings__debug worker__env">{s.code}</pre>}
+              {s.code && <CopyableCode ports={ports} text={s.code} />}
               {s.checksum && (
                 <details class="setup__checksum-details">
                   <summary>{ports.i18n.t('worker_setup_checksum')}: <code>{s.checksum.value.slice(0, 12)}…</code></summary>

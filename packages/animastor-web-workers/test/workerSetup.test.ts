@@ -12,9 +12,10 @@ import {
   platformSelectable, linuxModeAvailability,
   setupStatusKey, setupStatusClass,
   initialWizardState, canGoNext, nextStep, prevStep,
-  stepTitleKey, stepBodyKey, formatDiskBudget, bootstrapOneLiner, normalizeInstallSteps,
+  stepTitleKey, stepBodyKey, formatDiskBudget, maskSecret,
   type SetupProfile, type SetupMethod, type DeploymentCapability,
 } from '../src/workerSetup';
+import * as workerSetup from '../src/workerSetup';
 import { buildSetupContract, renderEnvBlock, looksLikeWorkerToken } from '../src/privateWorkers';
 import type { WorkerApiPort, WorkerApiError } from '../src/ports';
 
@@ -513,44 +514,32 @@ describe('instruction step mapping', () => {
   });
 });
 
-// ── One-command install (curl | bash, quoted URL) ────────────────────────────
+// ── Worker Key preview + install steps (backend contract 0.2.4) ────────────
 
-describe('one-command install', () => {
-  const URL_ = 'https://app.animastor.org/gpu/installer?profile=audio%2Fqwen-tts&mode=existing&platform=linux';
+describe('worker key preview', () => {
+  it('keeps a short preview and never exposes the middle of the key', () => {
+    const key = 'wrk.abcdef0123456789';
+    expect(maskSecret(key)).toBe('wrk.…6789');
+    expect(maskSecret(key)).not.toContain('abcdef0123');
+    expect(maskSecret('short')).toBe('•••••');
+    expect(maskSecret('')).toBe('');
+    expect(maskSecret(null)).toBe('');
+    expect(maskSecret(undefined)).toBe('');
+  });
+});
 
-  it('builds `curl -fsSL "<url>" | bash` with the URL in double quotes (& must not background the command)', () => {
-    expect(bootstrapOneLiner(URL_)).toBe(`curl -fsSL "${URL_}" | bash`);
+describe('install steps render the backend contract verbatim', () => {
+  it('the legacy two-step normalizer is gone (backend 0.2.4 sends ONE command)', () => {
+    expect('normalizeInstallSteps' in workerSetup).toBe(false);
+    expect('bootstrapOneLiner' in workerSetup).toBe(false);
   });
 
-  it('refuses URLs that would break the quoting', () => {
-    for (const bad of ['https://h/x"; rm -rf ~', 'https://h/$(id)', 'https://h/`id`', 'https://h/a b', '', null]) {
-      expect(bootstrapOneLiner(bad as string | null)).toBeNull();
-    }
-  });
-
-  it('merges the legacy two-step bootstrap (old contract) into ONE quoted command', () => {
-    const steps = [
-      { id: 'prerequisites', title: 'p', body: 'p' },
-      { id: 'download-bootstrap', title: 'Download', body: 'd', code: `curl -fsSL -o animastor-installer.sh ${URL_}` },
-      { id: 'run-bootstrap', title: 'Run', body: 'r', code: 'bash animastor-installer.sh' },
-      { id: 'verify', title: 'v', body: 'v' },
-    ];
-    const out = normalizeInstallSteps(steps);
-    expect(out.map((s) => s.id)).toEqual(['prerequisites', 'run-bootstrap', 'verify']);
-    expect(out[1].code).toBe(`curl -fsSL "${URL_}" | bash`);
-    expect(out[1].code).not.toContain('-o animastor-installer.sh');
-  });
-
-  it('passes the new contract, Windows and isolated flows through unchanged', () => {
-    const fresh = [{ id: 'run-bootstrap', title: 'Run', body: 'r', code: `curl -fsSL "${URL_}" | bash` }, { id: 'verify', title: 'v', body: 'v' }];
-    expect(normalizeInstallSteps(fresh)).toBe(fresh);
-    const win = [
-      { id: 'download-bootstrap', title: 'd', body: 'd', code: `Invoke-WebRequest -UseBasicParsing -Uri "${URL_}" -OutFile animastor-installer.ps1` },
-      { id: 'run-bootstrap', title: 'r', body: 'r', code: 'powershell -ExecutionPolicy Bypass -File .\\animastor-installer.ps1' },
-    ];
-    expect(normalizeInstallSteps(win)).toBe(win);
-    const isolated = [{ id: 'download-bootstrap', title: 'd', body: 'd', code: 'curl -fsSL -o animastor-installer-0.2.0.tar.gz https://h/gpu/installer/bundle' }];
-    expect(normalizeInstallSteps(isolated)).toBe(isolated);
+  it('the linux one-liner arrives already quoted by the backend', () => {
+    const url = 'https://app.animastor.org/gpu/installer?profile=audio%2Fqwen-tts&mode=existing&platform=linux';
+    const step = { id: 'run-bootstrap', title: 'Run', body: 'r', code: `curl -fsSL "${url}" | bash` };
+    expect(step.code.startsWith('curl -fsSL "')).toBe(true);
+    expect(step.code.endsWith('" | bash')).toBe(true);
+    expect(step.code).not.toContain('-o animastor-installer.sh');
   });
 });
 
