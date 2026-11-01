@@ -26,7 +26,7 @@
     "@animastor/web-navigator": "^0.1.0",
     "@animastor/web-player": "^0.1.0",
     "@animastor/web-settings": "^0.1.0",
-    "@animastor/web-workers": "^0.1.0",
+    "@animastor/web-workers": "^0.2.0",
     "@preact/signals": "^1.3.0",
     "preact": "^10.24.0",
     "preact-router": "^4.1.2"
