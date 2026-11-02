@@ -29,9 +29,9 @@ import type {
 } from '../api/models';
 import {
   loadLayerConfig as loadLayerConfigDomain,
-  persistLayerConfig as persistLayerConfigDomain,
   getAssetsState,
 } from '@animastor/web-generator-config';
+import { createLayerConfigSync } from '../features/generation/layerSync';
 import { sceneRefs } from '../api/models';
 import type { SceneRef } from '../api/models';
 import { navigateTo, position } from './positionStore';
@@ -306,6 +306,10 @@ export const imageEnabled = signal(true);
 export const videoEnabled = signal(true);
 export const layerConfigLoaded = signal(false);
 export const hasAssets = signal(false);
+/** True while a layer-config PUT is unconfirmed — the toggle chips and the
+ *  layer Generate buttons are disabled for exactly this window. */
+export const layerConfigSaving = signal(false);
+export const layerConfigSaveError = signal<string | null>(null);
 
 // ── Parallel / Subagent AI Analysis (Milestone #2) ──
 // analysisMode governs the orchestrator path the backend uses for the
@@ -320,10 +324,34 @@ export const analysisMode = signal<'sequential' | 'parallel'>('sequential');
 export const analysisParallelism = signal<number>(3);
 export const analysisConfigLoaded = signal(false);
 
-export function setVBookEnabled(v: boolean): void { vbookEnabled.value = v; void persistLayerConfig(); }
-export function setAudioEnabled(v: boolean): void { audioEnabled.value = v; void persistLayerConfig(); }
-export function setImageEnabled(v: boolean): void { imageEnabled.value = v; void persistLayerConfig(); }
-export function setVideoEnabled(v: boolean): void { videoEnabled.value = v; void persistLayerConfig(); }
+// One PUT per user action: the writer coalesces the setters of a single
+// action, serializes requests (never two in flight) and always sends the
+// latest flags — a stale snapshot can no longer land after a newer one
+// (E2E 02.11: image=true for 0.36 s after the user switched it off).
+const layerSync = createLayerConfigSync(
+  {
+    audio_enabled: audioEnabled.value,
+    image_enabled: imageEnabled.value,
+    video_enabled: videoEnabled.value,
+    vbook_enabled: vbookEnabled.value,
+  },
+  {
+    persist: async (config) => {
+      const id = bookId.value;
+      if (!id) return;
+      await putJson(`/book/${encodeURIComponent(id)}/layer-config`, config);
+    },
+    onChange: (s) => {
+      layerConfigSaving.value = s.pending;
+      layerConfigSaveError.value = s.lastError;
+    },
+  },
+);
+
+export function setVBookEnabled(v: boolean): void { vbookEnabled.value = v; layerSync.request({ vbook_enabled: v }); }
+export function setAudioEnabled(v: boolean): void { audioEnabled.value = v; layerSync.request({ audio_enabled: v }); }
+export function setImageEnabled(v: boolean): void { imageEnabled.value = v; layerSync.request({ image_enabled: v }); }
+export function setVideoEnabled(v: boolean): void { videoEnabled.value = v; layerSync.request({ video_enabled: v }); }
 
 export async function loadLayerConfig(): Promise<void> {
   const cfg = await loadLayerConfigDomain(
@@ -340,22 +368,17 @@ export async function loadLayerConfig(): Promise<void> {
     if (typeof p === 'number' && Number.isFinite(p)) {
       analysisParallelism.value = Math.min(8, Math.max(1, p));
     }
+    // Server state is the new baseline — but never clobber an unsaved click
+    // (reset() is a no-op while a PUT is on the wire).
+    layerSync.reset({
+      audio_enabled: cfg.audio_enabled,
+      image_enabled: cfg.image_enabled,
+      video_enabled: cfg.video_enabled,
+      vbook_enabled: cfg.vbook_enabled,
+    });
   }
   layerConfigLoaded.value = true;
   analysisConfigLoaded.value = true;
-}
-
-async function persistLayerConfig(): Promise<void> {
-  await persistLayerConfigDomain(
-    { getJson, putJson },
-    bookId.value,
-    {
-      audio_enabled: audioEnabled.value,
-      image_enabled: imageEnabled.value,
-      video_enabled: videoEnabled.value,
-      vbook_enabled: vbookEnabled.value,
-    },
-  );
 }
 
 export async function refreshAssetsState(): Promise<void> {

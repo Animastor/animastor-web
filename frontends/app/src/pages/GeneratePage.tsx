@@ -8,7 +8,7 @@ import { useDesktopShell } from '../app/desktop';
 import { workerType } from '../app/routeState';
 import {
   bookId, phase, vbookProgress, isRegenerating,
-  audioEnabled, imageEnabled, videoEnabled, vbookEnabled,
+  audioEnabled, imageEnabled, videoEnabled, vbookEnabled, layerConfigSaving,
   setAudioEnabled, setImageEnabled, setVideoEnabled, setVBookEnabled,
   startGeneration, startVBookGeneration, cancelGeneration, cancelTask, retryStoppedTask,
   checkAndRestoreGenerationState, checkVBookAgentStatus, computeProgressRows,
@@ -312,7 +312,7 @@ export function GeneratePage(props: { path?: string }) {
             {runningText}
           </span>
           <span class="gen-desk-bar__actions">
-            <button type="button" class="btn gen-desk-bar__gen" onClick={onGenerateAll}>
+            <button type="button" class="btn gen-desk-bar__gen" disabled={layerConfigSaving.value} onClick={onGenerateAll}>
               <IconPlay width={18} height={18} /> {t('generate_all')}
             </button>
             <button type="button" class="btn btn--outlined gen-desk-bar__stop" onClick={onStopAll}>
@@ -326,7 +326,7 @@ export function GeneratePage(props: { path?: string }) {
       <div class="card gen-card gen-card--global">
         <span class="gen-card__label">{t('generate_global_section')}</span>
         <div class="gen-global-row">
-          <button class="btn gen-btn gen-btn--global" onClick={onGenerateAll}>
+          <button class="btn gen-btn gen-btn--global" disabled={layerConfigSaving.value} onClick={onGenerateAll}>
             <IconPlay width={20} height={20} /> {t('generate_all')}
           </button>
           <button class="btn gen-btn gen-btn--stop" onClick={onStopAll}>
@@ -343,6 +343,7 @@ export function GeneratePage(props: { path?: string }) {
         state={sectionState('vbook')}
         onToggle={() => { setVBookEnabled(!vbookEnabled.value); }}
         enabled={vbookEnabled.value}
+        busy={layerConfigSaving.value}
         onSettings={() => onOpenSettings('vbook')}
         onGenerate={onGenerateVBook}
         genLabel={vbookBtnText}
@@ -364,6 +365,7 @@ export function GeneratePage(props: { path?: string }) {
         state={sectionState('audio')}
         onToggle={() => { setAudioEnabled(!audioEnabled.value); }}
         enabled={audioEnabled.value}
+        busy={layerConfigSaving.value}
         onSettings={() => onOpenSettings('audio')}
         onGenerate={() => onGenerateLayer('audio')}
         genLabel={t('generate_audio')}
@@ -381,6 +383,7 @@ export function GeneratePage(props: { path?: string }) {
         state={sectionState('image')}
         onToggle={() => { setImageEnabled(!imageEnabled.value); }}
         enabled={imageEnabled.value}
+        busy={layerConfigSaving.value}
         onSettings={() => onOpenSettings('image')}
         onGenerate={() => onGenerateLayer('image')}
         genLabel={t('generate_images')}
@@ -398,6 +401,7 @@ export function GeneratePage(props: { path?: string }) {
         state={sectionState('video')}
         onToggle={() => { setVideoEnabled(!videoEnabled.value); }}
         enabled={videoEnabled.value}
+        busy={layerConfigSaving.value}
         onSettings={() => onOpenSettings('video')}
         onGenerate={() => onGenerateLayer('video')}
         genLabel={t('generate_video')}
@@ -459,12 +463,14 @@ export function GeneratePage(props: { path?: string }) {
 //  WORKER SECTION — one card (fragment_generate.xml section block)
 // ═══════════════════════════════════════════════════════════════
 
-function WorkerSection({ label, iconActive, iconInactive, state, enabled, onToggle, onSettings, onGenerate, genLabel, onStop, rows, showDoneRow, onRowStop, children }: {
+function WorkerSection({ label, iconActive, iconInactive, state, enabled, busy, onToggle, onSettings, onGenerate, genLabel, onStop, rows, showDoneRow, onRowStop, children }: {
   label: string;
   iconActive: JSX.Element;
   iconInactive: JSX.Element;
   state: { total: number; active: number; iconState: 'error' | 'active' | 'normal' | 'off'; enabled: boolean };
   enabled: boolean;
+  /** A layer-config PUT is unconfirmed — block further layer actions. */
+  busy?: boolean;
   onToggle: () => void;
   onSettings: () => void;
   onGenerate: () => void;
@@ -482,7 +488,7 @@ function WorkerSection({ label, iconActive, iconInactive, state, enabled, onTogg
   return (
     <div class="card gen-card">
       {/* Header row — updateHeaderPanelStyle (accent bar + bg) */}
-      <div class={'gen-header' + (enabled ? ' gen-header--on' : '')} onClick={onToggle}>
+      <div class={'gen-header' + (enabled ? ' gen-header--on' : '')} onClick={() => { if (!busy) onToggle(); }}>
         <span class={'gen-header__bar' + (enabled ? ' gen-header__bar--on' : '')} />
         <span class={'gen-header__icon gen-header__icon--' + state.iconState + (pulse ? ' gen-header__icon--pulse' : '')}>
           {showActiveIcon ? iconActive : iconInactive}
@@ -498,6 +504,7 @@ function WorkerSection({ label, iconActive, iconInactive, state, enabled, onTogg
         <button
           class={'gen-toggle' + (enabled ? ' gen-toggle--on' : '')}
           aria-pressed={enabled}
+          disabled={busy}
           onClick={(e) => { e.stopPropagation(); onToggle(); }}
         >
           {enabled ? t('toggle_on') : t('toggle_off')}
@@ -518,7 +525,7 @@ function WorkerSection({ label, iconActive, iconInactive, state, enabled, onTogg
 
       {/* Action buttons */}
       <div class="gen-actions">
-        <button class="btn gen-btn" onClick={onGenerate}>
+        <button class="btn gen-btn" disabled={busy} onClick={onGenerate}>
           <IconPlay width={20} height={20} /> {genLabel}
         </button>
         <button class="btn gen-btn gen-btn--stop" onClick={onStop}>
