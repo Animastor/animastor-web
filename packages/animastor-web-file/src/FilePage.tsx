@@ -25,6 +25,18 @@ import type {
 // (generateStore), api/client, app/i18n, app/icons, app/router, lib/ui or
 // AppShell. The host wires the real implementations in app/fileAdapters.ts.
 
+// MIME per export type. Chosen here, not from the response: the backend serves
+// the .vbook bundle as application/zip, and the browser derives the saved
+// extension from the Blob type — an untyped blob is treated as text/plain
+// ("<id>.vbook.txt") and a zip type gains ".zip" on Android ("<id>.vbook.zip").
+// application/octet-stream for the book keeps the "<id>.vbook" name intact.
+const EXPORT_MIME: Record<FileExportType, string> = {
+  book: 'application/octet-stream',
+  storyboard: 'application/zip',
+  audio: 'audio/mpeg',
+  video: 'video/mp4',
+};
+
 export function FilePage(props: { path?: string; ports: FilePorts }) {
   const { ports } = props;
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -135,7 +147,7 @@ export function FilePage(props: { path?: string; ports: FilePorts }) {
         : type === 'storyboard' ? `${bId}_storyboard.zip`
         : type === 'audio' ? `${bId}.mp3`
         : `${bId}.vbook`;
-      triggerDownload(blob, filename);
+      triggerDownload(blob, filename, EXPORT_MIME[type]);
       setExportStatus({ text: ports.i18n.t('export_saved') });
       await new Promise((r) => setTimeout(r, 3000));
       setExportStatus(null);
@@ -262,8 +274,12 @@ function DownloadCard({ icon, title, desc, enabled, onClick }: {
 
 // CreateDocument → browser download: object URL + <a download> click
 // (web equivalent of writing to the SAF content URI).
-function triggerDownload(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
+// The blob is re-wrapped when its own type differs from the caller's MIME: the
+// object URL carries the blob type, so the caller's MIME must win over whatever
+// the response happened to send (or its absence).
+function triggerDownload(blob: Blob, filename: string, mime: string): void {
+  const typed = blob.type === mime ? blob : new Blob([blob], { type: mime });
+  const url = URL.createObjectURL(typed);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;

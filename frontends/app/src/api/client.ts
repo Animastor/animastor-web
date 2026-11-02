@@ -118,7 +118,10 @@ export async function getBlob(path: string, signal?: AbortSignal, onProgress?: (
     } finally {
       reader.releaseLock();
     }
-    return new Blob(chunks);
+    // Keep the response type when the server sends one. Callers that need a
+    // specific MIME (exports/downloads) still set it themselves — an absent
+    // Content-Type yields a type-less blob, which the browser saves as text.
+    return new Blob(chunks, { type: res.headers.get('Content-Type') ?? '' });
   } catch (e) {
     if (timedOut()) throw new ApiError('Request timeout', 408);
     throw e;

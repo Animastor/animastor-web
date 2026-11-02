@@ -379,3 +379,81 @@ describe('FilePage — export/download flow', () => {
     expect(events.filter((e) => e.startsWith('blob:'))).toEqual([]);
   });
 });
+
+// ── Download MIME ────────────────────────────────────────────────────────
+// The browser derives the saved extension from the Blob type handed to the
+// object URL: an untyped blob is treated as text/plain (".vbook.txt") and a zip
+// type gains ".zip" on Android (".vbook.zip"). The page therefore types the blob
+// by export kind instead of trusting the response.
+
+describe('FilePage — download MIME per export type', () => {
+  const objects: Blob[] = [];
+  const downloads: string[] = [];
+
+  beforeEach(() => {
+    objects.length = 0;
+    downloads.length = 0;
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((b) => { objects.push(b as Blob); return 'blob:fake'; });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    // htmlAnchor.click() navigates in happy-dom — capture the download name and
+    // keep the frame where it is.
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloads.push(this.download);
+    });
+  });
+
+  // getBlob returns an UNTYPED blob on purpose: the page's MIME must win (the
+  // response type is never relied on).
+  function readyPorts(phase: FilePhase = 'SCENE_READY') {
+    const { ports } = makePorts();
+    ports.session.bookId.value = 'b1';
+    ports.session.buildId.value = 'bd1';
+    ports.session.phase.value = phase;
+    (ports.http.getBlob as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_path: string, onProgress?: (p: number) => void) => {
+        onProgress?.(1);
+        return new Blob(['x']);
+      },
+    );
+    return ports;
+  }
+
+  it('book → application/octet-stream, "<id>.vbook" (not text/plain, not zip)', async () => {
+    render(<FilePage ports={readyPorts('IDLE')} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Book' }));
+    await waitFor(() => expect(downloads).toEqual(['b1.vbook']));
+    expect(objects).toHaveLength(1);
+    expect(objects[0].type).toBe('application/octet-stream');
+  });
+
+  it('storyboard → application/zip, "<id>_storyboard.zip"', async () => {
+    render(<FilePage ports={readyPorts()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Storyboard' }));
+    await waitFor(() => expect(downloads).toEqual(['b1_storyboard.zip']));
+    expect(objects[0].type).toBe('application/zip');
+  });
+
+  it('audio → audio/mpeg, "<id>.mp3"', async () => {
+    render(<FilePage ports={readyPorts('PLAYING')} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Audio' }));
+    await waitFor(() => expect(downloads).toEqual(['b1.mp3']));
+    expect(objects[0].type).toBe('audio/mpeg');
+  });
+
+  it('video → video/mp4, "<id>_final.mp4"', async () => {
+    render(<FilePage ports={readyPorts('PLAYING')} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Video' }));
+    await waitFor(() => expect(downloads).toEqual(['b1_final.mp4']));
+    expect(objects[0].type).toBe('video/mp4');
+  });
+
+  it('a blob that already carries the right MIME is passed through unwrapped', async () => {
+    const ports = readyPorts('IDLE');
+    const original = new Blob(['x'], { type: 'application/octet-stream' });
+    (ports.http.getBlob as ReturnType<typeof vi.fn>).mockResolvedValue(original);
+    render(<FilePage ports={ports} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Book' }));
+    await waitFor(() => expect(downloads).toEqual(['b1.vbook']));
+    expect(objects[0]).toBe(original);
+  });
+});
