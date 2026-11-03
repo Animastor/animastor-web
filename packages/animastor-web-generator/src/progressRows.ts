@@ -18,7 +18,7 @@ import type { ProgressPanelResponse, ProgressTask } from './models';
 import type { VBookProgress, VBookStage } from './vbookProgress';
 import type { GenerationTimerState } from './timer';
 import { blockedWorkerType, isStoppedState, taskRowState } from './taskStatus';
-import type { GpuWorkerType, TaskRowState } from './taskStatus';
+import type { FailedSceneRef, GpuWorkerType, TaskRowState } from './taskStatus';
 
 // Row display window for done rows (Android COMPLETED_TASK_DISPLAY_MS).
 const COMPLETED_TASK_DISPLAY_MS = 10_000;
@@ -120,11 +120,23 @@ export interface TaskRow {
   indeterminate: boolean;
   cancelled: boolean;
   /** Display state (Stage 155): active / done / cancelled / blocked /
-   *  interrupted. blocked and interrupted rows are stopped — no spinner, no
-   *  timer, they wait for a new command. */
+   *  interrupted / failed. blocked, interrupted and failed rows are stopped —
+   *  no spinner, no timer, they wait for a new command. */
   state: TaskRowState;
   /** The missing worker type of a blocked row (from blocked_reason). */
   blockedType: GpuWorkerType | null;
+  /** Classified terminal/last error (GPU retry policy): failureText input. */
+  errorClass: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  /** Scene the command failed on (failed rows; aggregated rows only). */
+  failedScene: FailedSceneRef | null;
+  /** true while an active row waits out a server-side retry pause. */
+  retrying: boolean;
+  retryNo: number | null;
+  retryMax: number | null;
+  /** Retry due time (ms epoch); drives the client-side countdown. */
+  retryAt: number | null;
   /** Frozen elapsed (done) vs live (active): -1 live, >= 0 frozen. */
   elapsedSeconds: number;
   /** true when elapsedSeconds is frozen at completion (Android row.tag >= 0). */
@@ -261,6 +273,14 @@ export function computeProgressRows(
       cancelled: sw.cancelled,
       state,
       blockedType: state === 'blocked' ? blockedWorkerType(sw.blocked_reason, sw.type) : null,
+      errorClass: sw.error_class ?? null,
+      errorCode: sw.error_code ?? null,
+      errorMessage: sw.error_message ?? null,
+      failedScene: sw.failed_scene ?? null,
+      retrying: !!sw.retrying,
+      retryNo: sw.retry_no ?? null,
+      retryMax: sw.retry_max ?? null,
+      retryAt: sw.retry_at ?? null,
       elapsedSeconds,
       frozen: done,
     });
@@ -300,6 +320,8 @@ export function computeProgressRows(
         endSceneLabel: null, endChapterLabel: null,
         ready: finalReady, total: finalTotal, percent: 100, done: true, countText: null,
         indeterminate: false, cancelled: false, state: 'done', blockedType: null,
+        errorClass: null, errorCode: null, errorMessage: null, failedScene: null,
+        retrying: false, retryNo: null, retryMax: null, retryAt: null,
         elapsedSeconds: tracking.taskFrozenElapsed.get(rowTaskKey('vbook', 'vbook', null, null)) ?? vbookElapsed, frozen: true,
       });
     } else {
@@ -325,7 +347,10 @@ export function computeProgressRows(
         chapterId: null, sceneId: null, sceneLabel: null, chapterLabel: null,
         endSceneLabel: null, endChapterLabel: null,
         ready, total, percent: pct, done: false, countText, indeterminate,
-        cancelled: false, state: 'active', blockedType: null, elapsedSeconds: vbookElapsed, frozen: false,
+        cancelled: false, state: 'active', blockedType: null,
+        errorClass: null, errorCode: null, errorMessage: null, failedScene: null,
+        retrying: false, retryNo: null, retryMax: null, retryAt: null,
+        elapsedSeconds: vbookElapsed, frozen: false,
       });
     }
   }
