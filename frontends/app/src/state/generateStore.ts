@@ -53,7 +53,8 @@ import {
   applyAnalysisEvent, analysisOverallPercent as analysisOverallPercentDomain,
   computeProgressRows as computeProgressRowsDomain, createGenerationTimer, createIdleVBookProgress,
   createInitialAnalysisProgress, createProgressTrackingState, elapsedSeconds, formatTimerText,
-  hasAnyProgress as hasAnyProgressDomain, resetProgressTracking, retryCommandFor,
+  failedSceneCaption, failureText, formatFailureText,
+  hasAnyProgress as hasAnyProgressDomain, resetProgressTracking, retryCommandFor, retryLine,
   startGenerationTimer, stopGenerationTimer,
 } from '@animastor/web-generator';
 import {
@@ -64,7 +65,7 @@ import {
 import type { VBookAgentPorts } from '@animastor/web-generator-vbook';
 import type {
   AgentStatusLike, AnalysisProgress, AnalysisStatus, AnalysisTaskRow,
-  GenerationTimerState, ProgressEventSink, ProgressPanelState, ProgressTrackingState,
+  FailedSceneRef, GenerationTimerState, ProgressEventSink, ProgressPanelState, ProgressTrackingState,
   TaskLabels, TaskRow, VBookProgress, VBookStage,
 } from '@animastor/web-generator';
 
@@ -258,7 +259,11 @@ export const phase = signal<PlayerPhase>('IDLE');
 //  uiState (GenUiState), isRegenerating, timer, layer config
 // ═══════════════════════════════════════════════════════════════
 
-export type { VBookProgress, TaskRow, TaskLabels, ProgressPanelState, AgentStatusLike };
+export type { VBookProgress, TaskRow, TaskLabels, ProgressPanelState, AgentStatusLike, FailedSceneRef };
+
+// GPU retry policy (2026-11-02) — pure task-status helpers re-exported for the
+// view layer (pages consume the generation domain through this store).
+export { failedSceneCaption, failureText, formatFailureText, retryLine };
 
 export const vbookProgress = signal<VBookProgress>(createIdleVBookProgress());
 export const isRegenerating = signal(false);

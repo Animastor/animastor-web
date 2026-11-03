@@ -1638,6 +1638,17 @@ button { font: inherit; color: inherit; }
   transition: width .4s ease;
 }
 .gen-row__bar-fill--done { background: var(--success); }
+/* GPU retry policy — small notes under the row: the failed scene caption
+   (§ТЗ фронтам п.4) and the retry-pause countdown + last error (п.5) */
+.gen-row__caption,
+.gen-row__retryline,
+.gen-row__note {
+  font-size: 0.6875rem; /* ~11sp */
+  color: var(--text-2);
+  margin-top: 0.125rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gen-row__retryline { color: var(--accent); font-variant-numeric: tabular-nums; }
 .gen-row__bar-ind {
   height: 100%; background: var(--accent);
   animation: gen-indeterminate 1.2s infinite cubic-bezier(0.4, 0, 0.2, 1);
