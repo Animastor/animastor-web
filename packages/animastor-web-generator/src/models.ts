@@ -46,6 +46,25 @@ export interface ProgressTask {
   blocked_reason?: string | null;
   /** Interrupted by a backend restart — resumed only by a new command. */
   interrupted?: boolean;
+  /** Terminally failed command (GPU retry policy 2026-11-02) — visible, not
+   *  running, restarted only by a new explicit command. */
+  failed?: boolean;
+  /** The scene the command failed on ({chapter_id, scene_id}) or null. */
+  failed_scene?: { chapter_id?: string | null; scene_id?: string | null } | null;
+  /** Class of the terminal error (`failed`) / of the last error while a
+   *  retry pause runs (`active`); absent on older backends. */
+  error_class?: string | null;
+  /** Refinement of error_class (comfy_rejected, cuda_oom, …) or null. */
+  error_code?: string | null;
+  /** Short, stack-free error text (≤200 chars) or null. */
+  error_message?: string | null;
+  /** true while an `active` row waits out a server-side retry pause. */
+  retrying?: boolean;
+  /** Retry number / maximum (transient — 2, oom — 1) while retrying. */
+  retry_no?: number | null;
+  retry_max?: number | null;
+  /** When the server retries (ms epoch) while retrying, else null. */
+  retry_at?: number | null;
 }
 
 /** SSE /book/{id}/progress-stream — ProgressEvent (api/models.ts:701).

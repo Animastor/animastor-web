@@ -14,8 +14,9 @@ import {
   checkAndRestoreGenerationState, checkVBookAgentStatus, computeProgressRows,
   resetGenerationStatus, onPlaybackPrepared,
   liveElapsedSeconds, formatTimerText,
+  failedSceneCaption, failureText, formatFailureText, retryLine,
 } from '../state/generateStore';
-import type { TaskLabels, TaskRow } from '../state/generateStore';
+import type { FailedSceneRef, TaskLabels, TaskRow } from '../state/generateStore';
 import { position as positionSignal } from '../state/positionStore';
 import { bookResource, onResourceInvalidated } from '../state/resourceInvalidations';
 import { resilientReload, sharedRecovery } from '../state/resilientReloader';
@@ -54,6 +55,11 @@ export function GeneratePage(props: { path?: string }) {
   const [, setTimerTick] = useState(0);
   const [scopeFor, setScopeFor] = useState<WorkerType | 'all' | null>(null);
   const [popupRow, setPopupRow] = useState<TaskRow | null>(null);
+
+  // GPU retry policy — caption of the scene a command failed on (§ТЗ фронтам п.4):
+  // resolved from the ALREADY LOADED book, same lookup as the backend scene_label.
+  const sceneCaption = useCallback((fs: FailedSceneRef | null): string | null =>
+    failedSceneCaption(bookData?.chapters ?? null, fs), [bookData]);
 
   const bid = bookId.value;
   const currentPhase = phase.value;
@@ -351,6 +357,7 @@ export function GeneratePage(props: { path?: string }) {
         rows={rowsFor('vbook')}
         showDoneRow={showDoneRow}
         onRowStop={setPopupRow}
+        sceneCaption={sceneCaption}
       >
         {/* Parallel AI Analysis progress panel (Milestone #2) — renders
             nothing in sequential mode; see AnalysisProgressPanel. */}
@@ -373,6 +380,7 @@ export function GeneratePage(props: { path?: string }) {
         rows={rowsFor('audio')}
         showDoneRow={showDoneRow}
         onRowStop={setPopupRow}
+        sceneCaption={sceneCaption}
       />
 
       {/* Image section */}
@@ -391,6 +399,7 @@ export function GeneratePage(props: { path?: string }) {
         rows={rowsFor('image')}
         showDoneRow={showDoneRow}
         onRowStop={setPopupRow}
+        sceneCaption={sceneCaption}
       />
 
       {/* Video section */}
@@ -409,6 +418,7 @@ export function GeneratePage(props: { path?: string }) {
         rows={rowsFor('video')}
         showDoneRow={showDoneRow}
         onRowStop={setPopupRow}
+        sceneCaption={sceneCaption}
       />
 
       {/* Scope dialog (DialogGenerateScopeBinding) */}
@@ -463,7 +473,7 @@ export function GeneratePage(props: { path?: string }) {
 //  WORKER SECTION — one card (fragment_generate.xml section block)
 // ═══════════════════════════════════════════════════════════════
 
-function WorkerSection({ label, iconActive, iconInactive, state, enabled, busy, onToggle, onSettings, onGenerate, genLabel, onStop, rows, showDoneRow, onRowStop, children }: {
+function WorkerSection({ label, iconActive, iconInactive, state, enabled, busy, onToggle, onSettings, onGenerate, genLabel, onStop, rows, showDoneRow, onRowStop, sceneCaption, children }: {
   label: string;
   iconActive: JSX.Element;
   iconInactive: JSX.Element;
@@ -479,6 +489,8 @@ function WorkerSection({ label, iconActive, iconInactive, state, enabled, busy, 
   rows: TaskRow[];
   showDoneRow: boolean;
   onRowStop: (row: TaskRow) => void;
+  /** Caption of the scene a failed command died on (GPU retry policy). */
+  sceneCaption: (failedScene: FailedSceneRef | null) => string | null;
   /** Optional extra block rendered below the progress rows.
    *  Used by the VBook section to inject the parallel-analysis panel. */
   children?: JSX.Element | null;
@@ -518,7 +530,7 @@ function WorkerSection({ label, iconActive, iconInactive, state, enabled, busy, 
           // A generation task can emit several rows sharing one task_id (per-target
           // rows, e.g. cover + scene) — the key must be unique per ROW or React
           // would reconcile duplicate keys and drop/misrender rows.
-          <WorkerRow key={row.taskId ? `${row.taskId}:${row.chapterId ?? ''}:${row.sceneId ?? ''}:${i}` : `${row.type}-${i}`} row={row} onStop={() => onRowStop(row)} />
+          <WorkerRow key={row.taskId ? `${row.taskId}:${row.chapterId ?? ''}:${row.sceneId ?? ''}:${i}` : `${row.type}-${i}`} row={row} onStop={() => onRowStop(row)} sceneCaption={sceneCaption} />
         ))}
         {children}
       </div>
@@ -540,13 +552,25 @@ function WorkerSection({ label, iconActive, iconInactive, state, enabled, busy, 
 //  WORKER ROW — item_worker_progress.xml
 // ═══════════════════════════════════════════════════════════════
 
-function WorkerRow({ row, onStop }: { row: TaskRow; onStop: () => void }) {
+function WorkerRow({ row, onStop, sceneCaption }: { row: TaskRow; onStop: () => void; sceneCaption: (failedScene: FailedSceneRef | null) => string | null }) {
   const elapsed = row.frozen ? row.elapsedSeconds : liveElapsedSeconds();
   const name = scopedTaskLabel(row);
   // Android renderTaskRowsToSections: workerCount = countText ?: "${ready}/${total}"
   // (GPU workers have no server countText → shows the ready/total chunk counter,
   // e.g. "2/5" — same format as progress_vbook_scenes). Hidden for indeterminate.
   const countText = row.countText ?? (row.total > 0 ? `${row.ready}/${row.total}` : null);
+  // GPU retry policy §ТЗ фронтам п.5: while the server pauses before a retry the
+  // row stays ACTIVE (spinner + timer) and a small line counts down to retry_at
+  // by the CLIENT clock; once it passes → «Повтор…» until the next progress-panel
+  // poll. The frontend performs no actions — the server does the retry.
+  const retry = row.retrying ? retryLine(true, row.retryNo, row.retryMax, row.retryAt, Date.now()) : null;
+  const retryNote = retry == null ? null
+    : retry.key === 'task_retrying_now' ? t('task_retrying_now')
+      : tf('task_retrying', ...retry.args);
+  // The reason of the LAST error, shown small under the pause line (optional).
+  const hasError = row.errorClass != null || row.errorCode != null || row.errorMessage != null;
+  const cause = row.retrying && hasError ? failureText(row.errorClass, row.errorCode, row.errorMessage, row.type) : null;
+  const causeNote = cause ? formatFailureText(t(cause.key), cause.arg) : null;
   // Stage 155 — a cancelled command: «Отменено», no buttons; it leaves the
   // panel by the existing finished-task logic.
   if (row.state === 'cancelled' || row.cancelled) {
@@ -555,6 +579,26 @@ function WorkerRow({ row, onStop }: { row: TaskRow; onStop: () => void }) {
         <span class="gen-row__name gen-row__name--cancelled">
           {t('task_cancelled')} — {name}
         </span>
+      </div>
+    );
+  }
+  // GPU retry policy — a terminally failed command: the classified reason, no
+  // spinner, no timer, no auto-retry; «Повторить» sends a NEW /regenerate
+  // (same type + scope, never automatic).
+  if (row.state === 'failed') {
+    const f = failureText(row.errorClass, row.errorCode, row.errorMessage, row.type);
+    const caption = row.scope !== 'current_scene' && row.failedScene
+      ? sceneCaption(row.failedScene)
+      : null;
+    return (
+      <div class="gen-row gen-row--stopped">
+        <div class="gen-row__line">
+          <span class="gen-row__name gen-row__name--stopped">{formatFailureText(t(f.key), f.arg)} — {name}</span>
+          <button class="btn gen-row__retry" onClick={() => { void onRetry(row); }}>
+            {t('task_retry')}
+          </button>
+        </div>
+        {caption != null && <div class="gen-row__caption">{caption}</div>}
       </div>
     );
   }
@@ -588,6 +632,8 @@ function WorkerRow({ row, onStop }: { row: TaskRow; onStop: () => void }) {
           </button>
         </div>
         <div class="gen-row__bar"><div class="gen-row__bar-ind" /></div>
+        {retryNote != null && <div class="gen-row__retryline">{retryNote}</div>}
+        {causeNote != null && <div class="gen-row__note">{causeNote}</div>}
       </div>
     );
   }
@@ -618,6 +664,8 @@ function WorkerRow({ row, onStop }: { row: TaskRow; onStop: () => void }) {
       <div class="gen-row__bar">
         <div class="gen-row__bar-fill" style={{ width: `${Math.min(100, Math.max(0, row.percent))}%` }} />
       </div>
+      {retryNote != null && <div class="gen-row__retryline">{retryNote}</div>}
+      {causeNote != null && <div class="gen-row__note">{causeNote}</div>}
     </div>
   );
 }

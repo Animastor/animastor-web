@@ -58,11 +58,28 @@ export type {
 export {
   blockedWorkerType,
   commandWorkerType,
+  failedSceneCaption,
+  failureText,
+  formatFailureText,
+  formatRetryCountdown,
   isStoppedState,
   retryCommandFor,
+  retryLine,
   taskRowState,
 } from './taskStatus';
-export type { GpuWorkerType, RetryCommand, TaskRowState, TaskStatusFields } from './taskStatus';
+export type {
+  CaptionChapter,
+  CaptionScene,
+  FailureKey,
+  FailureText,
+  FailedSceneRef,
+  GpuWorkerType,
+  RetryCommand,
+  RetryLine,
+  RetryLineKey,
+  TaskRowState,
+  TaskStatusFields,
+} from './taskStatus';
 
 // ── Timer ──
 export {

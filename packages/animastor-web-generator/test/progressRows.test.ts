@@ -430,3 +430,86 @@ describe('computeProgressRows — Stage 155 stopped commands (command-only gener
     expect(h.ctx.tracking.newGenerationPending).toBe(false);
   });
 });
+
+describe('computeProgressRows — GPU retry policy (failed / retrying)', () => {
+  it('failed row: visible, not running, carries the classified error and failed_scene', () => {
+    const h = harness();
+    const state = computeProgressRows(h.ctx, panel([task({
+      type: 'image', scope: 'whole_book', status: 'failed', failed: true,
+      failed_scene: { chapter_id: 'ch-1', scene_id: 'sc-1' },
+      error_class: 'deterministic', error_code: 'comfy_missing_node',
+      error_message: 'No prompt_id: invalid_prompt: node does not exist.',
+      ready: 2, total: 5, indeterminate: true,
+    })], false), null, LABELS);
+    expect(state.kind).toBe('rows');
+    if (state.kind !== 'rows') return;
+    const row = state.rows[0];
+    expect(row.state).toBe('failed');
+    expect(row.done).toBe(false);
+    expect(row.indeterminate).toBe(false);
+    expect(row.errorClass).toBe('deterministic');
+    expect(row.errorCode).toBe('comfy_missing_node');
+    expect(row.errorMessage).toBe('No prompt_id: invalid_prompt: node does not exist.');
+    expect(row.failedScene).toEqual({ chapter_id: 'ch-1', scene_id: 'sc-1' });
+    expect(row.retrying).toBe(false);
+    expect(h.effects.regenerating).not.toContain(true);
+    expect(h.effects.finalized).toBe(0);
+  });
+
+  it('a failed row never becomes done, never expires, opens the new-generation gate', () => {
+    const h = harness();
+    startGenerationTimer(h.ctx.timer, NOW - 1_000);
+    const failed = task({ status: 'failed', failed: true, ready: 5, total: 5 });
+    computeProgressRows(h.ctx, panel([failed], false), null, LABELS);
+    h.ctx.now = NOW + 60_000;
+    const later = computeProgressRows(h.ctx, panel([failed], false), null, LABELS);
+    expect(later.kind).toBe('rows');
+    if (later.kind !== 'rows') return;
+    expect(later.rows[0].state).toBe('failed');
+    expect(later.rows[0].done).toBe(false);
+    expect(h.effects.finalized).toBe(0);
+
+    h.ctx.tracking.newGenerationPending = true;
+    const gated = computeProgressRows(h.ctx, panel([failed], false), null, LABELS);
+    expect(gated.kind).toBe('rows');
+    expect(h.ctx.tracking.newGenerationPending).toBe(false);
+  });
+
+  it('retrying row: stays active (spinner), carries retry_no/retry_max/retry_at + last error', () => {
+    const h = harness();
+    const state = computeProgressRows(h.ctx, panel([task({
+      type: 'video', status: 'active', ready: 1, total: 5, indeterminate: true,
+      retrying: true, retry_no: 1, retry_max: 2, retry_at: NOW + 30_000,
+      error_class: 'transient', error_code: 'execution_timeout', error_message: 'Timeout waiting result',
+    })]), null, LABELS);
+    expect(state.kind).toBe('rows');
+    if (state.kind !== 'rows') return;
+    const row = state.rows[0];
+    expect(row.state).toBe('active');
+    expect(row.retrying).toBe(true);
+    expect(row.retryNo).toBe(1);
+    expect(row.retryMax).toBe(2);
+    expect(row.retryAt).toBe(NOW + 30_000);
+    expect(row.errorClass).toBe('transient');
+    expect(row.errorMessage).toBe('Timeout waiting result');
+    expect(row.indeterminate).toBe(true);
+    expect(h.effects.regenerating).toEqual([true]);
+  });
+
+  it('an old backend without the new fields behaves exactly as before', () => {
+    const h = harness();
+    const state = computeProgressRows(h.ctx, panel([task({ type: 'audio', ready: 1, total: 5 })]), null, LABELS);
+    expect(state.kind).toBe('rows');
+    if (state.kind !== 'rows') return;
+    const row = state.rows[0];
+    expect(row.state).toBe('active');
+    expect(row.errorClass).toBe(null);
+    expect(row.errorCode).toBe(null);
+    expect(row.errorMessage).toBe(null);
+    expect(row.failedScene).toBe(null);
+    expect(row.retrying).toBe(false);
+    expect(row.retryNo).toBe(null);
+    expect(row.retryMax).toBe(null);
+    expect(row.retryAt).toBe(null);
+  });
+});
