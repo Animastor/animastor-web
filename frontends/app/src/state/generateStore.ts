@@ -600,11 +600,51 @@ export interface GenerationRequest {
 }
 export type GenerationResult =
   | { ok: true; dirty: number; scope: string }
-  | { ok: false; message: string; code?: 'layer_disabled' };
+  | { ok: false; message: string; code?: 'layer_disabled' | 'no_user_action' };
 
-export async function startGeneration(req: GenerationRequest): Promise<GenerationResult> {
+// ── Explicit user action (reports/2026-11-04/regenerate-sweep-fix.md) ──
+// A GPU command (/regenerate) is sent ONLY from a click handler: the caller
+// passes a UserAction built from the click event right there. Effects,
+// timers, polls, SSE handlers and restore paths have no event and cannot build
+// one, so they cannot send a command by construction. The action is also sent
+// to the backend as `client_action` (additive field, ignored by older
+// backends) so a command can be traced to the button that sent it.
+export type CommandSource = 'generator.scope_dialog' | 'generator.retry_row';
+export interface UserAction {
+  kind: 'user_click';
+  source: CommandSource;
+  actionId: string;
+  /** Event.isTrusted of the click (false for synthetic/programmatic clicks). */
+  trusted: boolean;
+  at: number;
+}
+
+function newActionId(): string {
+  const bytes = new Uint8Array(8);
+  globalThis.crypto.getRandomValues(bytes);
+  let hex = '';
+  for (const b of bytes) hex += b.toString(16).padStart(2, '0');
+  return `ua-${hex}`;
+}
+
+/** Build the UserAction of a click — call ONLY inside an onClick handler. */
+export function userAction(source: CommandSource, ev: { isTrusted?: boolean } | null | undefined): UserAction {
+  return { kind: 'user_click', source, actionId: newActionId(), trusted: ev?.isTrusted === true, at: Date.now() };
+}
+
+function isUserAction(a: unknown): a is UserAction {
+  const v = a as UserAction | null | undefined;
+  return !!v && v.kind === 'user_click' && typeof v.source === 'string' && typeof v.actionId === 'string';
+}
+
+export async function startGeneration(req: GenerationRequest, action: UserAction): Promise<GenerationResult> {
   const bId = bookId.value;
   if (!bId) return { ok: false, message: 'No book' };
+  if (!isUserAction(action)) {
+    // Fail-closed: no click → no command (and no RUNNING state either).
+    console.warn('startGeneration refused: no explicit user action');
+    return { ok: false, code: 'no_user_action', message: 'no_user_action' };
+  }
   setGenerationStatus('RUNNING');
   isRegenerating.value = true;
   progressTracking.newGenerationPending = true;
@@ -617,6 +657,12 @@ export async function startGeneration(req: GenerationRequest): Promise<Generatio
       scope: req.scope,
       chapter_id: req.chapterId,
       scene_id: req.sceneId,
+      client_action: {
+        kind: action.kind,
+        source: action.source,
+        action_id: action.actionId,
+        trusted: action.trusted,
+      },
     });
     if (res.build_id) setGenerationBuildId(res.build_id);
     phase.value = 'SCENE_READY';
@@ -649,10 +695,10 @@ export async function startGeneration(req: GenerationRequest): Promise<Generatio
  * command with the same worker type and scope is sent (the backend supersedes
  * the stopped task). Returns null when the row has nothing to repeat.
  */
-export async function retryStoppedTask(row: TaskRow): Promise<GenerationResult | null> {
+export async function retryStoppedTask(row: TaskRow, action: UserAction): Promise<GenerationResult | null> {
   const cmd = retryCommandFor(row);
   if (!cmd) return null;
-  return startGeneration(cmd);
+  return startGeneration(cmd, action);
 }
 
 /**

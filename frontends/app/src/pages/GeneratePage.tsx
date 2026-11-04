@@ -14,7 +14,7 @@ import {
   checkAndRestoreGenerationState, checkVBookAgentStatus, computeProgressRows,
   resetGenerationStatus, onPlaybackPrepared,
   liveElapsedSeconds, formatTimerText,
-  failedSceneCaption, failureText, formatFailureText, retryLine,
+  failedSceneCaption, failureText, formatFailureText, retryLine, userAction,
 } from '../state/generateStore';
 import type { FailedSceneRef, TaskLabels, TaskRow } from '../state/generateStore';
 import { position as positionSignal } from '../state/positionStore';
@@ -426,7 +426,7 @@ export function GeneratePage(props: { path?: string }) {
         <ScopeDialog
           hasPosition={pos.chapterId != null}
           onCancel={() => setScopeFor(null)}
-          onStart={(scope) => {
+          onStart={(scope, ev) => {
             setScopeFor(null);
             const chId = scope !== 'whole_book' ? pos.chapterId : null;
             const scId = (scope === 'current_scene' || scope === 'from_current_scene') ? pos.sceneId : null;
@@ -442,7 +442,10 @@ export function GeneratePage(props: { path?: string }) {
               toast(tf('generate_all_started', layers, scopeLabel));
             } else if (scopeFor === 'audio' || scopeFor === 'image' || scopeFor === 'video') {
               void (async () => {
-                const res = await startGeneration({ workerTypes: [scopeFor], scope, chapterId: chId, sceneId: scId });
+                const res = await startGeneration(
+                  { workerTypes: [scopeFor], scope, chapterId: chId, sceneId: scId },
+                  userAction('generator.scope_dialog', ev),
+                );
                 if (res.ok) toast(tf('generate_started_layer', t(scopeFor === 'audio' ? 'progress_label_audio' : scopeFor === 'image' ? 'progress_label_image' : 'progress_label_video')));
                 else toast(res.code === 'layer_disabled' ? res.message : tf('generate_start_failed', res.message));
               })();
@@ -594,7 +597,7 @@ function WorkerRow({ row, onStop, sceneCaption }: { row: TaskRow; onStop: () => 
       <div class="gen-row gen-row--stopped">
         <div class="gen-row__line">
           <span class="gen-row__name gen-row__name--stopped">{formatFailureText(t(f.key), f.arg)} — {name}</span>
-          <button class="btn gen-row__retry" onClick={() => { void onRetry(row); }}>
+          <button class="btn gen-row__retry" onClick={(ev) => { void onRetry(row, ev); }}>
             {t('task_retry')}
           </button>
         </div>
@@ -614,7 +617,7 @@ function WorkerRow({ row, onStop, sceneCaption }: { row: TaskRow; onStop: () => 
       <div class="gen-row gen-row--stopped">
         <div class="gen-row__line">
           <span class="gen-row__name gen-row__name--stopped">{status} — {name}</span>
-          <button class="btn gen-row__retry" onClick={() => { void onRetry(row); }}>
+          <button class="btn gen-row__retry" onClick={(ev) => { void onRetry(row, ev); }}>
             {blocked ? t('task_retry') : t('task_continue')}
           </button>
         </div>
@@ -672,8 +675,8 @@ function WorkerRow({ row, onStop, sceneCaption }: { row: TaskRow; onStop: () => 
 
 // Stage 155 — «Повторить» / «Продолжить»: a NEW explicit /regenerate with the
 // row's worker type and scope (never automatic).
-async function onRetry(row: TaskRow): Promise<void> {
-  const res = await retryStoppedTask(row);
+async function onRetry(row: TaskRow, ev: Event): Promise<void> {
+  const res = await retryStoppedTask(row, userAction('generator.retry_row', ev));
   if (!res) return;
   const typeLabel = t(row.type === 'audio' ? 'progress_label_audio' : row.type === 'video' ? 'progress_label_video' : 'progress_label_image');
   if (res.ok) toast(tf('generate_started_layer', typeLabel));
@@ -732,12 +735,19 @@ function buildLabels(): TaskLabels {
 //  SCOPE DIALOG — DialogGenerateScopeBinding (radio group)
 // ═══════════════════════════════════════════════════════════════
 
+// A tap that OPENED the dialog (or a double tap on «Генерировать …») must
+// never also confirm it: «Старт» ignores activations during the first
+// SCOPE_DIALOG_ARM_MS after the dialog appeared (reports/2026-11-04/
+// regenerate-sweep-fix.md — a /regenerate the owner did not intend).
+export const SCOPE_DIALOG_ARM_MS = 400;
+
 function ScopeDialog({ hasPosition, onCancel, onStart }: {
   hasPosition: boolean;
   onCancel: () => void;
-  onStart: (scope: string) => void;
+  onStart: (scope: string, ev: Event) => void;
 }) {
   const [scope, setScope] = useState('whole_book');
+  const openedAt = useRef(Date.now());
   // Desktop dialog discipline (plan §6/§11): initial focus on the safe action
   // (Cancel), Escape cancels, body scroll is locked while open. onCancel is an
   // inline arrow from the parent, which re-renders every 500ms (timer tick) —
@@ -787,7 +797,13 @@ function ScopeDialog({ hasPosition, onCancel, onStart }: {
         </div>
         <div class="modal__footer">
           <button class="btn btn--outlined" ref={cancelRef} onClick={onCancel}>{t('dialog_cancel')}</button>
-          <button class="btn" onClick={() => onStart(scope)}>{t('dialog_start')}</button>
+          <button
+            class="btn"
+            onClick={(ev) => {
+              if (Date.now() - openedAt.current < SCOPE_DIALOG_ARM_MS) return;
+              onStart(scope, ev);
+            }}
+          >{t('dialog_start')}</button>
         </div>
       </div>
     </div>

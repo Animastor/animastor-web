@@ -663,6 +663,8 @@ export interface RegenerateRequest {
   scope?: string | null;
   chapter_id?: string | null;
   scene_id?: string | null;
+  /** The click that sent the command (additive; 2026-11-04). */
+  client_action?: { kind: 'user_click'; source: string; action_id: string; trusted: boolean } | null;
 }
 
 export interface RegenerateResponse {
