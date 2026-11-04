@@ -112,11 +112,12 @@ describe('Generator sends a GPU command only on an explicit click', () => {
     panelTasks = [{
       task_id: 'generation-audio-1', type: 'audio', label: 'Audio', state: 'blocked', status: 'blocked',
       blocked_reason: 'no_worker:audio', scope: 'current_scene', chapter_id: CH, scene_id: SC,
-      ready: 0, total: 1, percent: 0, done: false, target_count: 1,
+      ready: 0, total: 1, percent: 0, done: false, target_count: 1, visible: true,
     }];
     await mountGenerator();
     // 2.5 s restore check, 1.5 s panel poll, 5 s counts poll — run for 60 s.
     await flush(60_000);
+    expect(screen.getByText('Retry')).toBeTruthy(); // the row button IS on screen, never clicked
     // The player picks another scene, playback is prepared again (book reload).
     navigateTo({ chapterId: CH, sceneId: 'sc-7cd391e4', unitId: null, chunkId: null, unitIndex: 0 });
     emitPlaybackPrepared({ bookId: BOOK, buildId: `build_${BOOK}`, scenes: [], softRefresh: true });
@@ -193,4 +194,106 @@ describe('Generator sends a GPU command only on an explicit click', () => {
     expect(res).toMatchObject({ ok: false, code: 'no_user_action' });
     expect(regenerateCalls()).toEqual([]);
   });
+
+  // ── Integration E §6 (reports/2026-11-04/integration-A-B-C.md): every
+  //    Generator button against the click guard. Each generate button → exactly
+  //    ONE request; stop buttons → their own endpoints, never /regenerate. ──
+
+  function postCalls(suffix: string): unknown[][] {
+    return postJson.mock.calls.filter((c) => String(c[0]).endsWith(suffix));
+  }
+  const postJsonLong = client.postJsonLong as unknown as ReturnType<typeof vi.fn>;
+  function bootstrapCalls(): string[] {
+    return postJsonLong.mock.calls.map((c) => String(c[0])).filter((u) => /\/bootstrap(-next-window)?$/.test(u));
+  }
+
+  it('«Generate Video» → «From this scene onward» sends exactly ONE video command (chapter + scene)', async () => {
+    await mountGenerator();
+    await openScopeDialog('Generate Video');
+    await chooseAndStart('From this scene onward');
+    const calls = regenerateCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].body).toMatchObject({
+      rebuild_all: true, worker_types: ['video'], scope: 'from_current_scene', chapter_id: CH, scene_id: SC,
+    });
+    expect(calls[0].body.client_action).toMatchObject({ kind: 'user_click', source: 'generator.scope_dialog', trusted: false });
+  });
+
+  it('«Generate Images» → «Whole book» sends ONE image command whole_book + rebuild_all (no chapter/scene)', async () => {
+    await mountGenerator();
+    await openScopeDialog('Generate Images');
+    await chooseAndStart('Whole book');
+    const calls = regenerateCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].body).toMatchObject({ rebuild_all: true, worker_types: ['image'], scope: 'whole_book', chapter_id: null, scene_id: null });
+  });
+
+  it('«Generate All» → «Whole book» → «Start» is the VBook window: ONE bootstrap call, ZERO /regenerate', async () => {
+    await mountGenerator();
+    postJsonLong.mockClear();
+    await openScopeDialog('Generate All');
+    await chooseAndStart('Whole book');
+    await flush(1_000);
+    expect(regenerateCalls()).toEqual([]);
+    expect(bootstrapCalls()).toHaveLength(1);
+  });
+
+  it('«Generate VBook» (no dialog) → ONE bootstrap call, ZERO /regenerate', async () => {
+    await mountGenerator();
+    postJsonLong.mockClear();
+    fireEvent.click(screen.getAllByText(/^Generate VBook/)[0]);
+    await flush(1_000);
+    expect(regenerateCalls()).toEqual([]);
+    expect(bootstrapCalls()).toHaveLength(1);
+  });
+
+  for (const [state, label, extra] of [
+    ['failed', 'Retry', { failed: true, error_class: 'transient', error_code: 'network' }],
+    ['blocked', 'Retry', { blocked_reason: 'no_worker:audio' }],
+    ['interrupted', 'Continue', { interrupted: true }],
+  ] as const) {
+    it(`a ${state} row «${label}» sends exactly ONE command with the row's type/scope (source retry_row)`, async () => {
+      panelTasks = [{
+        task_id: `generation-audio-${state}`, type: 'audio', label: 'Audio', state, status: state,
+        scope: 'current_chapter', chapter_id: CH, scene_id: null,
+        ready: 0, total: 3, percent: 0, done: false, target_count: 3, visible: true, ...extra,
+      }];
+      await mountGenerator();
+      await flush(6_000); // restore check (2.5 s) + panel poll (1.5 s)
+      fireEvent.click(screen.getByText(label));
+      await flush(50);
+      const calls = regenerateCalls();
+      expect(calls).toHaveLength(1);
+      expect(calls[0].body).toMatchObject({ worker_types: ['audio'], scope: 'current_chapter', chapter_id: CH, scene_id: null });
+      expect(calls[0].body.client_action).toMatchObject({ kind: 'user_click', source: 'generator.retry_row' });
+    });
+  }
+
+  it('«Stop All», section «Stop» and a row stop never send /regenerate (cancel endpoints only)', async () => {
+    panelTasks = [{
+      task_id: 'generation-image-run', type: 'image', label: 'Images', state: 'running', status: 'running',
+      scope: 'whole_book', chapter_id: null, scene_id: null,
+      ready: 1, total: 4, percent: 25, done: false, target_count: 4, visible: true,
+    }];
+    await mountGenerator();
+    await flush(6_000); // restore check (2.5 s) + panel poll (1.5 s)
+    const rowStop = document.querySelector('.gen-row__stop');
+    expect(rowStop).toBeTruthy();
+    fireEvent.click(rowStop as Element);
+    await flush(10);
+    const cancelInPopup = document.querySelector('.gen-popup-backdrop button');
+    expect(cancelInPopup).toBeTruthy();
+    fireEvent.click(cancelInPopup as Element);
+    await flush(50);
+    fireEvent.click(screen.getAllByText('Stop All')[0]);
+    await flush(50);
+    for (const b of screen.getAllByText('Stop')) fireEvent.click(b);
+    await flush(50);
+    expect(regenerateCalls()).toEqual([]);
+    expect(postCalls('/cancel-generation')).toHaveLength(1);
+    // row stop (task_id) + one per section «Stop»
+    expect(postCalls('/cancel-worker').length).toBeGreaterThanOrEqual(2);
+    expect(postCalls('/cancel-worker').some((c) => (c[1] as { task_id?: string }).task_id === 'generation-image-run')).toBe(true);
+  });
 });
+
