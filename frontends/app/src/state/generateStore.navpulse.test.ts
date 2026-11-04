@@ -76,7 +76,7 @@ function doneTask(): ProgressTask {
  *  display window → all rows expire → onGenerationFinalized → SUCCESS. */
 function finalizeToSuccess(): void {
   bookId.value = 'test-book';
-  void store.startGeneration({ workerTypes: ['image'], scope: 'whole_book', chapterId: null, sceneId: null });
+  void store.startGeneration({ workerTypes: ['image'], scope: 'whole_book', chapterId: null, sceneId: null }, store.userAction('generator.scope_dialog', { isTrusted: true }));
   const running = doneTask();
   running.ready = 2; running.done = false;
   const pRunning: ProgressPanelResponse = { tasks: [running], overall_percent: 40, any_incomplete: true };
