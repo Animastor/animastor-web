@@ -864,7 +864,7 @@ export async function checkAndRestoreGenerationState(): Promise<void> {
   try {
     const [panel, counts] = await Promise.all([
       getJson<ProgressPanelResponse>(`/book/${encodeURIComponent(currentBookId)}/progress-panel`),
-      getJson<WorkerCounts>('/worker/counts'),
+      getJson<WorkerCounts>('/worker/counts', { cache: 'no-store' }),
     ]);
     const hasActiveGpuTasks = panel.any_incomplete;
     const hasActiveWorkers = hasActiveGpuTasks || (counts.active_vbook ?? 0) > 0;
