@@ -812,22 +812,44 @@ export async function cancelGeneration(): Promise<void> {
   }
 }
 
-/** Cancel a specific worker type or task (row stop / section stop). */
-export async function cancelTask(type: string, taskId?: string | null): Promise<void> {
+/** Cancel a specific worker type or task (row stop / section stop).
+ *  Resolves true on success: the backend answered and — for a task_id cancel —
+ *  listed that task in `task_ids` (2026-11-05, задача K: a stopped
+ *  interrupted/blocked/failed row is cancelled only when the backend says so).
+ *  Existing callers ignore the result. */
+export async function cancelTask(type: string, taskId?: string | null): Promise<boolean> {
   const bId = bookId.value;
-  if (!bId) return;
+  if (!bId) return false;
   if (type === 'vbook') {
     clearVBookProgress();
     vbookPollState.token++;
   }
   try {
-    await postJson(`/book/${encodeURIComponent(bId)}/cancel-worker`, {
+    const res = await postJson<{ ok?: boolean; task_ids?: string[] } | null>(`/book/${encodeURIComponent(bId)}/cancel-worker`, {
       type,
       task_id: taskId ?? null,
     });
+    if (!taskId) return true;
+    return Array.isArray(res?.task_ids) && res.task_ids.includes(taskId);
   } catch (e) {
     console.warn('cancelTask: backend call failed:', (e as Error).message);
+    return false;
   }
+}
+
+/** Task ids of stopped rows the user removed with «■ Снять» (задача K). The
+ *  backend keeps a cancelled task ~30 s (TERMINAL_RETENTION_MS) as a
+ *  «cancelled» row; the Generator hides it at once instead. */
+export const dismissedTaskIds = signal<ReadonlySet<string>>(new Set());
+
+/** «■ Снять» on a stopped (interrupted / blocked / failed) row: the same
+ *  cancel-worker request as the ■ of an active row; on success the row
+ *  disappears. Never sends /regenerate. */
+export async function dismissStoppedTask(row: TaskRow): Promise<boolean> {
+  if (!row.taskId) return false;
+  const ok = await cancelTask(row.type, row.taskId);
+  if (ok) dismissedTaskIds.value = new Set([...dismissedTaskIds.value, row.taskId]);
+  return ok;
 }
 
 /**

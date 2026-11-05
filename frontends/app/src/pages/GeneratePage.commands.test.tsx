@@ -47,9 +47,11 @@ vi.mock('../api/client', () => ({
     return {};
   }),
   putJson: vi.fn(async () => ({})),
-  postJson: vi.fn(async (url: string) => (url.endsWith('/regenerate')
+  postJson: vi.fn(async (url: string, body?: { task_id?: string | null }) => (url.endsWith('/regenerate')
     ? { book_id: BOOK, build_id: `build_${BOOK}`, scope: 'current_scene', dirty_scenes: [{ chapter_id: CH, scene_id: SC }] }
-    : {})),
+    : url.endsWith('/cancel-worker')
+      ? { ok: true, book_id: BOOK, task_ids: body?.task_id ? [body.task_id] : [] }
+      : {})),
   postJsonLong: vi.fn(async () => ({})),
   deleteJson: vi.fn(async () => ({})),
   getBlob: vi.fn(async () => new Blob([])),
@@ -58,8 +60,8 @@ vi.mock('../api/client', () => ({
 }));
 
 import * as client from '../api/client';
-import { GeneratePage, SCOPE_DIALOG_ARM_MS } from './GeneratePage';
-import { bookId, startGeneration, emitPlaybackPrepared } from '../state/generateStore';
+import { GeneratePage, SCOPE_DIALOG_ARM_MS, STOPPED_ROW_ARM_MS } from './GeneratePage';
+import { bookId, startGeneration, emitPlaybackPrepared, dismissedTaskIds } from '../state/generateStore';
 import { navigateTo } from '../state/positionStore';
 
 const postJson = client.postJson as unknown as ReturnType<typeof vi.fn>;
@@ -97,6 +99,7 @@ describe('Generator sends a GPU command only on an explicit click', () => {
     vi.useFakeTimers();
     postJson.mockClear();
     panelTasks = [];
+    dismissedTaskIds.value = new Set();
     document.documentElement.setAttribute('lang', 'en');
     bookId.value = BOOK;
     navigateTo({ chapterId: CH, sceneId: SC, unitId: null, chunkId: null, unitIndex: 0 });
@@ -108,7 +111,7 @@ describe('Generator sends a GPU command only on an explicit click', () => {
   });
 
   it('mount, polls, restore, position/book refresh and a stopped row on screen → ZERO POST /regenerate', async () => {
-    // A blocked row with a «Retry» button is on screen — never clicked.
+    // A blocked row with ▶ «Continue» / ■ «Remove» is on screen — never clicked.
     panelTasks = [{
       task_id: 'generation-audio-1', type: 'audio', label: 'Audio', state: 'blocked', status: 'blocked',
       blocked_reason: 'no_worker:audio', scope: 'current_scene', chapter_id: CH, scene_id: SC,
@@ -117,7 +120,7 @@ describe('Generator sends a GPU command only on an explicit click', () => {
     await mountGenerator();
     // 2.5 s restore check, 1.5 s panel poll, 5 s counts poll — run for 60 s.
     await flush(60_000);
-    expect(screen.getByText('Retry')).toBeTruthy(); // the row button IS on screen, never clicked
+    expect(screen.getByLabelText('Continue')).toBeTruthy(); // the row button IS on screen, never clicked
     // The player picks another scene, playback is prepared again (book reload).
     navigateTo({ chapterId: CH, sceneId: 'sc-7cd391e4', unitId: null, chunkId: null, unitIndex: 0 });
     emitPlaybackPrepared({ bookId: BOOK, buildId: `build_${BOOK}`, scenes: [], softRefresh: true });
@@ -247,27 +250,114 @@ describe('Generator sends a GPU command only on an explicit click', () => {
     expect(bootstrapCalls()).toHaveLength(1);
   });
 
-  for (const [state, label, extra] of [
-    ['failed', 'Retry', { failed: true, error_class: 'transient', error_code: 'network' }],
-    ['blocked', 'Retry', { blocked_reason: 'no_worker:audio' }],
-    ['interrupted', 'Continue', { interrupted: true }],
-  ] as const) {
-    it(`a ${state} row «${label}» sends exactly ONE command with the row's type/scope (source retry_row)`, async () => {
-      panelTasks = [{
-        task_id: `generation-audio-${state}`, type: 'audio', label: 'Audio', state, status: state,
-        scope: 'current_chapter', chapter_id: CH, scene_id: null,
-        ready: 0, total: 3, percent: 0, done: false, target_count: 3, visible: true, ...extra,
-      }];
-      await mountGenerator();
-      await flush(6_000); // restore check (2.5 s) + panel poll (1.5 s)
-      fireEvent.click(screen.getByText(label));
+  // Задача K (2026-11-05): a stopped row (failed / blocked / interrupted) has
+  // the active-row layout — progress, short status — and two icon buttons
+  // ▶ «Continue» (one /regenerate, source retry_row) / ■ «Remove» (cancel-worker
+  // by task_id; the row disappears; zero /regenerate).
+  const STOPPED = [
+    ['failed', 'error: Worker did not respond, retries exhausted', { failed: true, error_class: 'transient', error_code: 'network' }],
+    ['blocked', 'waiting for a worker', { blocked: true, blocked_reason: 'no_worker:audio' }],
+    ['interrupted', 'interrupted', { interrupted: true }],
+  ] as const;
+  function stoppedTask(state: string, extra: object): unknown {
+    return {
+      task_id: `generation-audio-${state}`, type: 'audio', label: 'Audio', state, status: state,
+      scope: 'current_chapter', chapter_id: CH, scene_id: null, chapter_label: 'Пролог',
+      ready: 1, total: 3, percent: 33, done: false, target_count: 3, visible: true, ...extra,
+    };
+  }
+  async function mountWithStopped(state: string, extra: object): Promise<HTMLElement> {
+    panelTasks = [stoppedTask(state, extra)];
+    await mountGenerator();
+    await flush(6_000); // restore check (2.5 s) + panel poll (1.5 s)
+    const row = document.querySelector(`.gen-row[data-state="${state}"]`) as HTMLElement | null;
+    expect(row).toBeTruthy();
+    return row as HTMLElement;
+  }
+
+  for (const [state, status, extra] of STOPPED) {
+    it(`a ${state} row renders progress, «${status}» and the two icon buttons (no big «Continue»)`, async () => {
+      const row = await mountWithStopped(state, extra);
+      expect(row.querySelector('.gen-row__name')?.textContent).toBe('Audio · Пролог');
+      expect(row.querySelector('.gen-row__count')?.textContent).toBe('1/3');
+      expect(row.querySelector('.gen-row__pct')?.textContent).toBe('33%');
+      expect((row.querySelector('.gen-row__bar-fill') as HTMLElement).style.width).toBe('33%');
+      expect(row.querySelector('.gen-row__status')?.textContent).toBe(status);
+      const buttons = [...row.querySelectorAll('button')];
+      expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Continue', 'Remove']);
+      expect(buttons.every((b) => b.classList.contains('gen-row__stop'))).toBe(true); // same size/style as ■
+      expect(row.querySelector('.gen-row__retry')).toBeNull();
+      expect(screen.queryByText('Continue')).toBeNull(); // no text button
+      expect(regenerateCalls()).toEqual([]);
+    });
+
+    it(`a ${state} row ▶ sends exactly ONE command with the row's type/scope (source retry_row)`, async () => {
+      const row = await mountWithStopped(state, extra);
+      const play = row.querySelector('[aria-label="Continue"]') as Element;
+      fireEvent.click(play);
+      fireEvent.click(play); // double tap — ignored
       await flush(50);
       const calls = regenerateCalls();
       expect(calls).toHaveLength(1);
       expect(calls[0].body).toMatchObject({ worker_types: ['audio'], scope: 'current_chapter', chapter_id: CH, scene_id: null });
       expect(calls[0].body.client_action).toMatchObject({ kind: 'user_click', source: 'generator.retry_row' });
+      expect(postCalls('/cancel-worker')).toEqual([]);
+    });
+
+    it(`a ${state} row ■ cancels that task (cancel-worker task_id), the row disappears, ZERO /regenerate`, async () => {
+      const row = await mountWithStopped(state, extra);
+      fireEvent.click(row.querySelector('[aria-label="Remove"]') as Element);
+      await flush(50);
+      const cancels = postCalls('/cancel-worker');
+      expect(cancels).toHaveLength(1);
+      expect(cancels[0][1]).toEqual({ type: 'audio', task_id: `generation-audio-${state}` });
+      expect(document.querySelector(`.gen-row[data-state="${state}"]`)).toBeNull();
+      // the backend keeps the cancelled task ~30 s — it never comes back as a row
+      panelTasks = [{ ...(stoppedTask(state, extra) as object), state: 'cancelled', status: 'cancelled', cancelled: true, interrupted: false, blocked: false, failed: false }];
+      await flush(5_000);
+      expect(document.querySelector('.gen-row[data-state]')).toBeNull();
+      expect(screen.queryByText(/Cancelled/)).toBeNull();
+      expect(regenerateCalls()).toEqual([]);
     });
   }
+
+  it('a stopped row ignores taps during the first STOPPED_ROW_ARM_MS after it appeared (double tap on the active ■)', async () => {
+    panelTasks = [{
+      task_id: 'generation-audio-x', type: 'audio', label: 'Audio', state: 'active', status: 'active',
+      scope: 'whole_book', chapter_id: null, scene_id: null,
+      ready: 1, total: 3, percent: 33, done: false, target_count: 3, visible: true,
+    }];
+    await mountGenerator();
+    await flush(6_000);
+    // the task becomes interrupted (backend restart) — the next poll swaps the row
+    panelTasks = [{ ...(panelTasks[0] as object), state: 'interrupted', status: 'interrupted', interrupted: true }];
+    let row: Element | null = null;
+    for (let i = 0; i < 40 && !row; i++) {
+      await flush(50);
+      row = document.querySelector('.gen-row[data-state="interrupted"]');
+    }
+    expect(row).toBeTruthy();
+    fireEvent.click(row!.querySelector('[aria-label="Continue"]') as Element);
+    fireEvent.click(row!.querySelector('[aria-label="Remove"]') as Element);
+    await flush(10);
+    expect(regenerateCalls()).toEqual([]);
+    expect(postCalls('/cancel-worker')).toEqual([]);
+    await flush(STOPPED_ROW_ARM_MS);
+    fireEvent.click(document.querySelector('.gen-row[data-state="interrupted"] [aria-label="Continue"]') as Element);
+    await flush(50);
+    expect(regenerateCalls()).toHaveLength(1);
+  });
+
+  it('■ on a stopped row: a backend that did not cancel the task (task_ids []) keeps the row', async () => {
+    const postJsonMock = postJson;
+    postJsonMock.mockImplementationOnce(async () => ({ ok: true, task_ids: [] }));
+    const row = await mountWithStopped('interrupted', { interrupted: true });
+    fireEvent.click(row.querySelector('[aria-label="Remove"]') as Element);
+    await flush(50);
+    expect(postCalls('/cancel-worker')).toHaveLength(1);
+    expect(document.querySelector('.gen-row[data-state="interrupted"]')).toBeTruthy();
+    expect(regenerateCalls()).toEqual([]);
+  });
 
   it('«Stop All», section «Stop» and a row stop never send /regenerate (cancel endpoints only)', async () => {
     panelTasks = [{

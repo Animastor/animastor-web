@@ -10,7 +10,7 @@ import {
   bookId, phase, vbookProgress, isRegenerating,
   audioEnabled, imageEnabled, videoEnabled, vbookEnabled, layerConfigSaving,
   setAudioEnabled, setImageEnabled, setVideoEnabled, setVBookEnabled,
-  startGeneration, startVBookGeneration, cancelGeneration, cancelTask, retryStoppedTask,
+  startGeneration, startVBookGeneration, cancelGeneration, cancelTask, retryStoppedTask, dismissStoppedTask, dismissedTaskIds,
   checkAndRestoreGenerationState, checkVBookAgentStatus, computeProgressRows,
   resetGenerationStatus, onPlaybackPrepared,
   liveElapsedSeconds, formatTimerText,
@@ -267,7 +267,9 @@ export function GeneratePage(props: { path?: string }) {
   // ── Rows per section container (renderTaskRowsToSections) ──
   const rowsFor = (type: WorkerType): TaskRow[] => {
     if (panel.kind !== 'rows') return [];
+    const dismissed = dismissedTaskIds.value;
     return panel.rows.filter((r) => {
+      if (r.taskId && dismissed.has(r.taskId)) return false;
       if (r.type === 'vbook') return type === 'vbook';
       if (r.type === 'audio') return type === 'audio';
       if (r.type === 'cover' || r.type === 'image') return type === 'image';
@@ -585,44 +587,21 @@ function WorkerRow({ row, onStop, sceneCaption }: { row: TaskRow; onStop: () => 
       </div>
     );
   }
-  // GPU retry policy — a terminally failed command: the classified reason, no
-  // spinner, no timer, no auto-retry; «Повторить» sends a NEW /regenerate
-  // (same type + scope, never automatic).
-  if (row.state === 'failed') {
-    const f = failureText(row.errorClass, row.errorCode, row.errorMessage, row.type);
-    const caption = row.scope !== 'current_scene' && row.failedScene
-      ? sceneCaption(row.failedScene)
-      : null;
-    return (
-      <div class="gen-row gen-row--stopped">
-        <div class="gen-row__line">
-          <span class="gen-row__name gen-row__name--stopped">{formatFailureText(t(f.key), f.arg)} — {name}</span>
-          <button class="btn gen-row__retry" onClick={(ev) => { void onRetry(row, ev); }}>
-            {t('task_retry')}
-          </button>
-        </div>
-        {caption != null && <div class="gen-row__caption">{caption}</div>}
-      </div>
-    );
-  }
-  // Stage 155 — a stopped command (no live worker / backend restart): no
-  // spinner, no timer; only an explicit new command restarts it.
-  if (row.state === 'blocked' || row.state === 'interrupted') {
-    const blocked = row.state === 'blocked';
-    const status = blocked
-      ? tf('task_blocked_no_worker', t(row.blockedType === 'audio' ? 'worker_type_audio'
-        : row.blockedType === 'video' ? 'worker_type_video' : 'worker_type_image'))
-      : t('task_interrupted');
-    return (
-      <div class="gen-row gen-row--stopped">
-        <div class="gen-row__line">
-          <span class="gen-row__name gen-row__name--stopped">{status} — {name}</span>
-          <button class="btn gen-row__retry" onClick={(ev) => { void onRetry(row, ev); }}>
-            {blocked ? t('task_retry') : t('task_continue')}
-          </button>
-        </div>
-      </div>
-    );
+  // Задача K (2026-11-05) — a stopped command (failed / blocked / interrupted)
+  // looks like an ordinary progress row: name, ready/total, percent, the bar
+  // at its current fill; a short status in place of the timer and two small
+  // square icon buttons ▶ «Продолжить» / ■ «Снять». Nothing restarts by itself.
+  if (row.state === 'failed' || row.state === 'blocked' || row.state === 'interrupted') {
+    let status: string;
+    let caption: string | null = null;
+    if (row.state === 'failed') {
+      const f = failureText(row.errorClass, row.errorCode, row.errorMessage, row.type);
+      status = tf('task_status_failed', formatFailureText(t(f.key), f.arg));
+      caption = row.scope !== 'current_scene' && row.failedScene ? sceneCaption(row.failedScene) : null;
+    } else {
+      status = row.state === 'blocked' ? t('task_status_blocked') : t('task_status_interrupted');
+    }
+    return <StoppedRow row={row} name={name} countText={countText} status={status} caption={caption} />;
   }
   if (row.indeterminate) {
     return (
@@ -669,6 +648,62 @@ function WorkerRow({ row, onStop, sceneCaption }: { row: TaskRow; onStop: () => 
       </div>
       {retryNote != null && <div class="gen-row__retryline">{retryNote}</div>}
       {causeNote != null && <div class="gen-row__note">{causeNote}</div>}
+    </div>
+  );
+}
+
+// Задача K — a tap that turned an active row into a stopped one (the ■ of the
+// active row, a double tap) must not land on ▶/■ of the stopped row: both icons
+// ignore activations during the first STOPPED_ROW_ARM_MS after the stopped row
+// appeared and for STOPPED_ROW_ARM_MS after an accepted activation (same 400 ms
+// as SCOPE_DIALOG_ARM_MS), and while a request of the row is in flight.
+export const STOPPED_ROW_ARM_MS = 400;
+
+export function StoppedRow({ row, name, countText, status, caption }: {
+  row: TaskRow; name: string; countText: string | null; status: string; caption: string | null;
+}) {
+  const armedAt = useRef(Date.now() + STOPPED_ROW_ARM_MS);
+  const inFlight = useRef(false);
+  const accept = (): boolean => {
+    const now = Date.now();
+    if (inFlight.current || now < armedAt.current) return false;
+    armedAt.current = now + STOPPED_ROW_ARM_MS;
+    return true;
+  };
+  const run = (fn: () => Promise<void>) => {
+    inFlight.current = true;
+    void fn().finally(() => { inFlight.current = false; });
+  };
+  const onContinue = (ev: Event) => {
+    if (!accept()) return;
+    run(() => onRetry(row, ev));
+  };
+  const onDismiss = () => {
+    if (!accept()) return;
+    run(async () => {
+      const ok = await dismissStoppedTask(row);
+      if (!ok) toast(t('task_dismiss_failed'));
+    });
+  };
+  const pct = Math.min(100, Math.max(0, row.percent));
+  return (
+    <div class={'gen-row gen-row--stopped gen-row--' + row.state} data-state={row.state}>
+      <div class="gen-row__line">
+        <span class="gen-row__name">{name}</span>
+        {countText != null && <span class="gen-row__count">{countText}</span>}
+        <span class="gen-row__pct gen-row__pct--stopped">{pct}%</span>
+        <span class="gen-row__status" title={status}>{status}</span>
+        <button type="button" class="gen-row__stop gen-row__continue" aria-label={t('task_continue')} title={t('task_continue')} onClick={onContinue}>
+          <IconPlay width={18} height={18} />
+        </button>
+        <button type="button" class="gen-row__stop gen-row__dismiss" aria-label={t('task_dismiss')} title={t('task_dismiss')} onClick={onDismiss}>
+          <IconStop width={18} height={18} />
+        </button>
+      </div>
+      <div class="gen-row__bar">
+        <div class="gen-row__bar-fill gen-row__bar-fill--stopped" style={{ width: `${pct}%` }} />
+      </div>
+      {caption != null && <div class="gen-row__caption">{caption}</div>}
     </div>
   );
 }

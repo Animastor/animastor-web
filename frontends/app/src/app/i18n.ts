@@ -778,6 +778,12 @@ const dict = {
     task_cancelled: 'Отменено',
     task_retry: 'Повторить',
     task_continue: 'Продолжить',
+    // Задача K (2026-11-05) — stopped row: short status + ■ «Снять»
+    task_status_interrupted: 'прервано',
+    task_status_blocked: 'ожидает воркер',
+    task_status_failed: 'ошибка: {0}',
+    task_dismiss: 'Снять',
+    task_dismiss_failed: 'Не удалось снять задачу',
     // GPU retry policy — причина терминальной ошибки (failureText) и пауза повтора
     task_failed_comfy_nodes: 'ComfyUI: нет нужных нод — {0}',
     task_failed_comfy_model: 'ComfyUI: модель не найдена — {0}',
@@ -1634,6 +1640,11 @@ const dict = {
     task_cancelled: 'Cancelled',
     task_retry: 'Retry',
     task_continue: 'Continue',
+    task_status_interrupted: 'interrupted',
+    task_status_blocked: 'waiting for a worker',
+    task_status_failed: 'error: {0}',
+    task_dismiss: 'Remove',
+    task_dismiss_failed: 'Could not remove the task',
     // GPU retry policy — terminal failure reason (failureText) and the retry pause
     task_failed_comfy_nodes: 'ComfyUI: required nodes missing — {0}',
     task_failed_comfy_model: 'ComfyUI: model not found — {0}',
