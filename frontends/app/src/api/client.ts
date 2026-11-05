@@ -73,7 +73,9 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs: numbe
   }
 }
 
-export async function getJson<T>(path: string): Promise<T> { return request<T>(path); }
+// `init` — per-request fetch options, e.g. `{ cache: 'no-store' }` for live
+// counters that must never be answered from the browser HTTP cache.
+export async function getJson<T>(path: string, init?: Pick<RequestInit, 'cache'>): Promise<T> { return request<T>(path, init); }
 export async function postJson<T>(path: string, body?: unknown, timeoutMs?: number): Promise<T> {
   return request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }, timeoutMs);
 }

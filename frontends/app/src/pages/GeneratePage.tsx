@@ -30,7 +30,8 @@ import { AnalysisProgressPanel } from './AnalysisProgressPanel';
 //  - 4 worker sections (VBook/Audio/Image/Video): header row (accent bar, icon,
 //    label "Audio Workers: N", settings gear, toggle chip On/Off), progress rows
 //    (item_worker_progress), action buttons (Generate/Stop).
-//  - Worker counts polled every 5s (updateSectionHeader icon states).
+//  - Worker counts polled every ~5s inside the progress-panel loop, no-store,
+//    forced on mount / tab visible (updateSectionHeader icon states).
 //  - Progress panel polled every 1.5s (computeProgressRows), timer 500ms.
 //  - checkAndRestoreGenerationState 2.5s after mount.
 //  - Scope dialog before Audio/Image/Video generation (DialogGenerateScopeBinding).
@@ -138,27 +139,39 @@ export function GeneratePage(props: { path?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Worker counts poll (5s) — updateSectionHeader ──
+  // ── Polls: progress panel (1.5s) + worker counts (5s) — one loop ──
+  // refreshProgressUi + updateSectionHeader. The counts share the panel's
+  // timer and `alive` flag, so they cannot stop while the panel keeps polling
+  // (reports/2026-11-05/release-J.md §6.6: the chip froze for 30 min while
+  // progress-panel kept going). `cache: 'no-store'` — never answered from the
+  // browser HTTP cache. Forced refresh on mount and when the tab becomes
+  // visible again.
   useEffect(() => {
     let alive = true;
-    const loop = async () => {
-      while (alive) {
-        try {
-          const c = await getJson<WorkerCounts>('/worker/counts');
-          if (alive) setCounts(c);
-        } catch { /* connection error — leave chips as-is */ }
-        await new Promise((r) => setTimeout(r, POLL_COUNTS_MS));
-      }
+    let countsInFlight = false;
+    let countsAgain = false;
+    let lastCountsAt = Number.NEGATIVE_INFINITY;
+    const refreshCounts = () => {
+      if (!alive) return;
+      if (countsInFlight) { countsAgain = true; return; }
+      countsInFlight = true;
+      countsAgain = false;
+      lastCountsAt = Date.now();
+      getJson<WorkerCounts>('/worker/counts', { cache: 'no-store' })
+        .then((c) => { if (alive) setCounts(c); })
+        .catch(() => { /* connection error — leave chips as-is */ })
+        .finally(() => {
+          countsInFlight = false;
+          if (countsAgain) refreshCounts();
+        });
     };
-    void loop();
-    return () => { alive = false; };
-  }, []);
-
-  // ── Progress panel poll (1.5s) — refreshProgressUi ──
-  useEffect(() => {
-    let alive = true;
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') refreshCounts();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     const loop = async () => {
       while (alive) {
+        if (Date.now() - lastCountsAt >= POLL_COUNTS_MS) refreshCounts();
         const labels = buildLabels();
         const bId = bookId.value;
         if (bId) {
@@ -179,7 +192,10 @@ export function GeneratePage(props: { path?: string }) {
       }
     };
     void loop();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   // ── Timer display refresh (500ms) ──
