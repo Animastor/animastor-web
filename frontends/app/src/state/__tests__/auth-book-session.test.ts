@@ -14,6 +14,7 @@ class MemStorage {
 
 const ls = new MemStorage();
 vi.stubGlobal('localStorage', ls);
+const ANON = { authenticated: false, identity: 'none', user: null, workspace: null };
 
 // Mock the API client so authStore / generateStore never hit the network.
 vi.mock('../../api/client', () => ({
@@ -45,6 +46,7 @@ vi.mock('../../app/i18n', () => ({
 
 beforeEach(() => {
   ls.clear();
+  vi.clearAllMocks();
 });
 
 // ── Tests ──
@@ -99,9 +101,10 @@ describe('logout() book session isolation', () => {
   it('logout stashes session and clears live key', async () => {
     const { loadBook } = await import('../generateStore');
     const { authMe, logout } = await import('../authStore');
-    const { postJson } = await import('../../api/client');
+    const { postJson, getJson } = await import('../../api/client');
 
     (postJson as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    (getJson as ReturnType<typeof vi.fn>).mockResolvedValue(ANON);
     authMe.value = {
       authenticated: true,
       user: { id: 'sureg', username: 'sureg' },
@@ -115,6 +118,37 @@ describe('logout() book session isolation', () => {
     const stashed = JSON.parse(ls.getItem(stashKey('sureg'))!);
     expect(stashed.id).toBe('import_1786345731767_1786345734345');
     expect(authMe.value.authenticated).toBe(false);
+  });
+});
+
+describe('fetchMe / logout cache discipline', () => {
+  it('fetchMe reads /auth/me with cache: no-store', async () => {
+    const { fetchMe } = await import('../authStore');
+    const { getJson } = await import('../../api/client');
+    (getJson as ReturnType<typeof vi.fn>).mockResolvedValue(ANON);
+
+    await fetchMe();
+
+    expect(getJson).toHaveBeenCalledWith('/auth/me', { cache: 'no-store' });
+  });
+
+  it('logout re-reads /auth/me after the server call (no optimistic-only state)', async () => {
+    const { authMe, logout } = await import('../authStore');
+    const { postJson, getJson } = await import('../../api/client');
+    (postJson as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    (getJson as ReturnType<typeof vi.fn>).mockResolvedValue({ ...ANON, identity: 'guest' });
+    authMe.value = {
+      authenticated: true,
+      user: { id: 'sureg', username: 'sureg' },
+      workspace: { id: 'ws1', name: 'ws', type: 'personal' },
+    };
+
+    await logout();
+
+    expect(postJson).toHaveBeenCalledWith('/auth/logout', {});
+    expect(getJson).toHaveBeenCalledWith('/auth/me', { cache: 'no-store' });
+    expect(authMe.value.authenticated).toBe(false);
+    expect(authMe.value.identity).toBe('guest');
   });
 });
 
@@ -188,6 +222,7 @@ describe('browser refresh after logout — session does not leak', () => {
       workspace: { id: 'ws1', name: 'ws', type: 'personal' },
     };
     (postJson as ReturnType<typeof vi.fn>).mockResolvedValue({});
+    (getJson as ReturnType<typeof vi.fn>).mockResolvedValue(ANON);
     generateStore.loadBook('import_1786345731767_1786345734345', '');
 
     await logout();

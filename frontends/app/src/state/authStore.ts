@@ -7,7 +7,7 @@ import { stashBookSessionForUser, restoreStashedBookSessionForUser } from './gen
 
 export interface AuthUser { id: string; username: string; display_name?: string | null; role?: string; }
 export interface AuthWorkspace { id: string; name: string; type: string; }
-export interface AuthMe { authenticated: boolean; user: AuthUser | null; workspace: AuthWorkspace | null; }
+export interface AuthMe { authenticated: boolean; identity?: string; user: AuthUser | null; workspace: AuthWorkspace | null; }
 
 export const authMe = signal<AuthMe>({ authenticated: false, user: null, workspace: null });
 export const authLoading = signal(false);
@@ -15,7 +15,9 @@ export const authError = signal<string | null>(null);
 
 export async function fetchMe(): Promise<AuthMe> {
   try {
-    const me = await getJson<AuthMe>('/auth/me');
+    // /auth/me is identity state: never let the browser HTTP cache answer it
+    // (a cached pre-logout body is the "sticky account" trap).
+    const me = await getJson<AuthMe>('/auth/me', { cache: 'no-store' });
     authMe.value = me;
     authError.value = null;
     return me;
@@ -75,4 +77,7 @@ export async function logout(): Promise<void> {
   // stashed per-user by stashBookSessionForUser().
   stashBookSessionForUser(userId);
   authMe.value = { authenticated: false, user: null, workspace: null };
+  // Re-read the server truth (the response is no-store) instead of trusting
+  // the optimistic local reset — a stale /auth/me body must never come back.
+  await fetchMe();
 }
