@@ -1,6 +1,7 @@
 import type { JSX } from 'preact';
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
-import { getJson } from '../api/client';
+import { getJson, POLL_REQUEST_TIMEOUT_MS } from '../api/client';
+import { onPanelRefreshRequested, requestPanelRefresh, waitForNextPoll } from '../state/panelRefresh';
 import type { BookData, BookChapter, BookScene, ProgressPanelResponse, WorkerCounts } from '../api/models';
 import { t, tf } from '../app/i18n';
 import { navigate } from '../app/router';
@@ -143,40 +144,60 @@ export function GeneratePage(props: { path?: string }) {
   // refreshProgressUi + updateSectionHeader. The counts share the panel's
   // timer and `alive` flag, so they cannot stop while the panel keeps polling
   // (reports/2026-11-05/release-J.md §6.6: the chip froze for 30 min while
-  // progress-panel kept going). `cache: 'no-store'` — never answered from the
-  // browser HTTP cache. Forced refresh on mount and when the tab becomes
-  // visible again.
+  // progress-panel kept going). Both GETs are `no-store` (api/client.ts
+  // isNoStorePath). О1 (reports/2026-11-07/orch-v2-image-scene-run.md):
+  //  - every request of the loop has its own 10 s timeout, so one hung fetch
+  //    cannot stop the panel (it froze on 0/1 after a finished command);
+  //  - the sleep between polls is interruptible: tab visible again, bfcache
+  //    restore (`pageshow`) and SSE `generation_complete` / v2 `progress`
+  //    re-poll the panel at once (state/panelRefresh.ts);
+  //  - a refresh requested while a poll is in flight is not lost (`again`).
   useEffect(() => {
     let alive = true;
     let countsInFlight = false;
     let countsAgain = false;
+    let panelAgain = false;
     let lastCountsAt = Number.NEGATIVE_INFINITY;
+    const stop = new AbortController();
     const refreshCounts = () => {
       if (!alive) return;
       if (countsInFlight) { countsAgain = true; return; }
       countsInFlight = true;
       countsAgain = false;
       lastCountsAt = Date.now();
-      getJson<WorkerCounts>('/worker/counts', { cache: 'no-store' })
+      getJson<WorkerCounts>('/worker/counts', { timeoutMs: POLL_REQUEST_TIMEOUT_MS, signal: stop.signal })
         .then((c) => { if (alive) setCounts(c); })
-        .catch(() => { /* connection error — leave chips as-is */ })
+        .catch(() => { /* connection error / timeout — leave chips as-is */ })
         .finally(() => {
           countsInFlight = false;
           if (countsAgain) refreshCounts();
         });
     };
+    const unsubscribe = onPanelRefreshRequested(() => { panelAgain = true; });
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') refreshCounts();
+      if (document.visibilityState === 'visible') {
+        refreshCounts();
+        requestPanelRefresh('visible');
+      }
+    };
+    const onPageShow = () => {
+      refreshCounts();
+      requestPanelRefresh('pageshow');
     };
     document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pageshow', onPageShow);
     const loop = async () => {
       while (alive) {
+        panelAgain = false;
         if (Date.now() - lastCountsAt >= POLL_COUNTS_MS) refreshCounts();
         const labels = buildLabels();
         const bId = bookId.value;
         if (bId) {
           try {
-            const panelRes = await getJson<ProgressPanelResponse>(`/book/${encodeURIComponent(bId)}/progress-panel`);
+            const panelRes = await getJson<ProgressPanelResponse>(
+              `/book/${encodeURIComponent(bId)}/progress-panel`,
+              { timeoutMs: POLL_REQUEST_TIMEOUT_MS, signal: stop.signal },
+            );
             const vbookProg = vbookProgress.value;
             const hasVBook = vbookProg != null && vbookProg.stage !== 'IDLE';
             let vbookToShow = vbookProg;
@@ -186,15 +207,19 @@ export function GeneratePage(props: { path?: string }) {
             }
             const state = computeProgressRows(panelRes, vbookToShow, labels);
             if (alive) setPanel(state);
-          } catch { /* next cycle */ }
+          } catch { /* timeout / connection error — next cycle */ }
         }
-        await new Promise((r) => setTimeout(r, POLL_PANEL_MS));
+        if (!alive) break;
+        if (!panelAgain) await waitForNextPoll(POLL_PANEL_MS, stop.signal);
       }
     };
     void loop();
     return () => {
       alive = false;
+      stop.abort();
+      unsubscribe();
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onPageShow);
     };
   }, []);
 

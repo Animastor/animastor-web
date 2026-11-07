@@ -5,7 +5,9 @@
 //  reports/2026-11-05/release-J.md §6.6: the «Audio Workers» chip stayed at
 //  the 08:02:11 snapshot for 30 minutes — GET /worker/counts stopped reaching
 //  the network while progress-panel kept polling. Pinned here:
-//   - counts are requested with `cache: 'no-store'`;
+//   - counts are requested with a 10 s poll timeout; `cache: 'no-store'` is
+//     the api/client default for /worker/counts (isNoStorePath, О1 —
+//     pinned in src/api/client.nostore.test.ts);
 //   - one request on mount;
 //   - the chip follows a changed response (0 → 1) without a reload;
 //   - the tab becoming visible again → an immediate request (not the next tick);
@@ -20,6 +22,7 @@ const BOOK = 'ba_worker_counts_test';
 let audioWorkers = 0;
 
 vi.mock('../api/client', () => ({
+  POLL_REQUEST_TIMEOUT_MS: 10_000,
   API_BASE: 'http://test',
   getJson: vi.fn(async (url: string) => {
     if (url.startsWith('/worker/counts')) {
@@ -47,6 +50,7 @@ vi.mock('../api/client', () => ({
 import * as client from '../api/client';
 import { GeneratePage } from './GeneratePage';
 import { bookId } from '../state/generateStore';
+import { requestPanelRefresh } from '../state/panelRefresh';
 
 const getJson = client.getJson as unknown as ReturnType<typeof vi.fn>;
 
@@ -81,11 +85,11 @@ describe('Generator worker-counts poll does not freeze', () => {
     vi.useRealTimers();
   });
 
-  it('mount → exactly one /worker/counts request, with cache: no-store', async () => {
+  it('mount → exactly one /worker/counts request, with the poll timeout', async () => {
     render(<GeneratePage path="/generate" />);
     await flush(50);
     expect(countsCalls()).toHaveLength(1);
-    expect(countsCalls()[0][1]).toEqual({ cache: 'no-store' });
+    expect(countsCalls()[0][1]).toMatchObject({ timeoutMs: 10_000 });
     expect(screen.getByText('Audio Workers: 0')).toBeTruthy();
   });
 
@@ -99,7 +103,7 @@ describe('Generator worker-counts poll does not freeze', () => {
     audioWorkers = 0; // and goes offline again
     await flush(7_000);
     expect(screen.getByText('Audio Workers: 0')).toBeTruthy();
-    for (const c of countsCalls()) expect(c[1]).toEqual({ cache: 'no-store' });
+    for (const c of countsCalls()) expect(c[1]).toMatchObject({ timeoutMs: 10_000 });
   });
 
   it('tab visible again → an immediate request, not the next tick', async () => {
@@ -130,6 +134,48 @@ describe('Generator worker-counts poll does not freeze', () => {
     const countTicks = countsCalls().length - c0;
     expect(panelTicks).toBeGreaterThan(300);
     expect(countTicks).toBeGreaterThanOrEqual(Math.floor(600_000 / 6_000) - 1);
+  });
+
+  // О1 (reports/2026-11-07/orch-v2-image-scene-run.md): the panel froze on 0/1.
+  it('О1: tab visible / pageshow / requestPanelRefresh → progress-panel re-polled at once', async () => {
+    render(<GeneratePage path="/generate" />);
+    await flush(50);
+    await flush(100); // inside the 1.5 s sleep
+    let p0 = panelCalls().length;
+    setVisibility('visible');
+    await flush(0);
+    expect(panelCalls().length).toBe(p0 + 1);
+    p0 = panelCalls().length;
+    window.dispatchEvent(new Event('pageshow'));
+    await flush(0);
+    expect(panelCalls().length).toBe(p0 + 1);
+    p0 = panelCalls().length;
+    requestPanelRefresh('sse');
+    await flush(0);
+    expect(panelCalls().length).toBe(p0 + 1);
+    for (const c of panelCalls()) expect(c[1]).toMatchObject({ timeoutMs: 10_000 });
+  });
+
+  it('О1: one hung progress-panel request does not stop the loop', async () => {
+    let hang = true;
+    const orig = getJson.getMockImplementation() as (url: string) => Promise<unknown>;
+    getJson.mockImplementation(async (url: string, init?: { signal?: AbortSignal; timeoutMs?: number }) => {
+      if (url.endsWith('/progress-panel') && hang) {
+        hang = false;
+        // the real client rejects with 408 after timeoutMs; emulate it
+        return new Promise((_res, rej) => setTimeout(() => rej(new Error('Request timeout')), init?.timeoutMs ?? 30_000));
+      }
+      return orig(url);
+    });
+    try {
+      render(<GeneratePage path="/generate" />);
+      await flush(50);
+      const p0 = panelCalls().length;
+      await flush(10_000 + 1_500 + 100);
+      expect(panelCalls().length).toBeGreaterThan(p0);
+    } finally {
+      getJson.mockImplementation(orig);
+    }
   });
 
   it('unmount stops both polls and the visibility listener', async () => {

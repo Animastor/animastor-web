@@ -17,6 +17,7 @@ vi.stubGlobal('localStorage', ls);
 
 // Mock the API client so authStore / generateStore never hit the network.
 vi.mock('../../api/client', () => ({
+  POLL_REQUEST_TIMEOUT_MS: 10_000,
   getJson: vi.fn(),
   postJson: vi.fn(),
   postJsonLong: vi.fn(),

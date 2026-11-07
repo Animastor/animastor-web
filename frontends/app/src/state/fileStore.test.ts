@@ -24,6 +24,7 @@ const postJson = vi.fn<typeof client.postJson>();
 const getJson = vi.fn<typeof client.getJson>();
 
 vi.mock('../api/client', () => ({
+  POLL_REQUEST_TIMEOUT_MS: 10_000,
   getJson: (...a: unknown[]) => getJson(...(a as Parameters<typeof client.getJson>)),
   postJson: (...a: unknown[]) => postJson(...(a as Parameters<typeof client.postJson>)),
   postJsonLong: vi.fn(),
