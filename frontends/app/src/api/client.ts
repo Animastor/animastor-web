@@ -73,9 +73,59 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs: numbe
   }
 }
 
-// `init` — per-request fetch options, e.g. `{ cache: 'no-store' }` for live
-// counters that must never be answered from the browser HTTP cache.
-export async function getJson<T>(path: string, init?: Pick<RequestInit, 'cache'>): Promise<T> { return request<T>(path, init); }
+// ── О1 (reports/2026-11-07/orch-v2-image-scene-run.md): live state is never
+// answered from the browser HTTP cache. A mobile browser served a 3-minute-old
+// `progress-panel` (status active, 0/1) after the command had finished; with
+// `?x=1` / incognito the server answered `tasks: []`. Every GET of a polling or
+// restore endpoint therefore defaults to `cache: 'no-store'` HERE, in one
+// place, instead of at each call site (the backend also sends
+// `Cache-Control: no-store` on the same paths). Paths are endpoint-relative
+// (without API_BASE), the query string is ignored.
+const NO_STORE_GET_PATHS: readonly RegExp[] = [
+  // /book/:id/{progress-panel,progress-stream,assets-state,status,agent-status,layer-config,generation*}
+  /^\/book\/[^/?]+\/(?:progress-panel|progress-stream|assets-state|status|agent-status|layer-config|generation[^/?]*)(?:[/?]|$)/,
+  // /scene/:book/:chapter/:scene/status
+  /^\/scene\/[^/?]+\/[^/?]+\/[^/?]+\/status(?:[/?]|$)/,
+  /^\/worker\/counts(?:[/?]|$)/,
+  // v2 generation API (/generate/*), present and future
+  /^\/generate(?:[/?]|$)/,
+];
+
+/** `true` when a GET of `path` must bypass the browser HTTP cache (polls,
+ *  restore-after-reopen, live counters). Pure — exported for tests. */
+export function isNoStorePath(path: string): boolean {
+  return NO_STORE_GET_PATHS.some((re) => re.test(path));
+}
+
+/** Default `cache` mode for a GET of `path`: 'no-store' for polling/restore
+ *  paths, otherwise the browser default (undefined). */
+export function defaultGetCache(path: string): RequestCache | undefined {
+  return isNoStorePath(path) ? 'no-store' : undefined;
+}
+
+/** Per-request timeout for one iteration of a polling loop: a single hung
+ *  request must not stop the loop (О1 — the Generator panel froze on 0/1). */
+export const POLL_REQUEST_TIMEOUT_MS = 10_000;
+
+export interface GetJsonInit {
+  /** Explicit fetch cache mode; defaults to defaultGetCache(path). */
+  cache?: RequestCache;
+  /** Caller abort signal. */
+  signal?: AbortSignal;
+  /** Request timeout (default 30 s; polls pass POLL_REQUEST_TIMEOUT_MS). */
+  timeoutMs?: number;
+}
+
+// `init.cache` — explicit override; otherwise polling/restore paths get
+// 'no-store' automatically (isNoStorePath).
+export async function getJson<T>(path: string, init?: GetJsonInit): Promise<T> {
+  const cache = init?.cache ?? defaultGetCache(path);
+  return request<T>(
+    path,
+    { ...(cache ? { cache } : {}), ...(init?.signal ? { signal: init.signal } : {}) },
+    init?.timeoutMs ?? REQUEST_TIMEOUT_MS,
+  );
+}
 export async function postJson<T>(path: string, body?: unknown, timeoutMs?: number): Promise<T> {
   return request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }, timeoutMs);
 }
@@ -230,6 +280,7 @@ export interface SseEvent {
 export async function* sse(path: string, signal?: AbortSignal): AsyncGenerator<SseEvent> {
   const res = await fetch(API_BASE + path, {
     headers: { 'Accept': 'text/event-stream' },
+    cache: 'no-store',
     signal
   });
   if (!res.ok || !res.body) throw new ApiError(res.statusText, res.status);
