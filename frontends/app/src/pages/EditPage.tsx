@@ -30,6 +30,7 @@ import type { JSX } from 'preact';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import { deleteJson, getJson, mediaUrl, patchJson, postJson, putJson } from '../api/client';
+import { behaviorCharacterEntries } from '../api/behaviors';
 import type {
   AppConfig, BehaviorReaction, BookChapter, BookData, BookScene, BookUnit, CharPassport, SceneTiming, WaveformData,
 } from '../api/models';
@@ -1333,7 +1334,7 @@ export function EditPage(props: { path?: string }) {
           m[fieldKey] = value;
           byChar.set(charId, m);
         });
-        const behaviors = bd.behaviors ?? {};
+        const behaviors = behaviorCharacterEntries(bd.behaviors);
         let anyChanged = false;
         for (const [charId, fields] of byChar) {
           // Skip entities deleted since the editor rendered (stale fieldValues).
@@ -1631,7 +1632,7 @@ export function EditPage(props: { path?: string }) {
   //     rejects duplicates with 409). ──
   const behaviorCharacters = useMemo(() => {
     const bd = bookData;
-    const behaviors = bd?.behaviors ?? {};
+    const behaviors = behaviorCharacterEntries(bd?.behaviors);
     return (bd?.characters ?? [])
       .filter((c) => c.id && !(c.id in behaviors))
       .map((c) => ({ id: c.id as string, name: c.name ?? '' }));
@@ -2038,7 +2039,7 @@ export function EditPage(props: { path?: string }) {
   // are edited as line-based text (behaviorLinesToText /
   // behaviorReactionsToText round-trip rules).
   const buildBehaviorsFields = (): JSX.Element[] => {
-    const behaviors = bookData?.behaviors ?? {};
+    const behaviors = behaviorCharacterEntries(bookData?.behaviors);
     const entries = Object.entries(behaviors);
     if (entries.length === 0) {
       return [<div class="edit-empty-inline" key="empty">{t('edit_no_behaviors')}</div>];
