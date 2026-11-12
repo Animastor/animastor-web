@@ -10,8 +10,9 @@
 //    WaveformView canvas (lib/waveform.tsx, R10) with draggable range handles,
 //    and a reset-to-original button. Drag preview is local; PUT /timings on
 //    release applies the server-side cascade (N2, 1:1).
-//  - 9 property tabs (Global/Chapter/Scene/Audio/Unit/Characters/Voices/
-//    Behavior/Locations) with scroll indicators; default tab = Unit (index 4).
+//  - 7 property tabs (Global/Chapter/Scene/Audio/Unit/Heroes/Locations) with
+//    scroll indicators; default tab = Unit (index 4). Heroes = grid of hero
+//    cards + the hero sheet (features/heroes, VBook v4 «файл на героя»).
 //  - Field editors per tab (inputCard/readOnlyCard ports). Characters/Voices are
 //    editable and save through dedicated endpoints (PATCH /characters/{id},
 //    PATCH /voices/{id}) — the Android save path routed their keys into the
@@ -30,9 +31,11 @@ import type { JSX } from 'preact';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import { deleteJson, getJson, mediaUrl, patchJson, postJson, putJson } from '../api/client';
-import { behaviorCharacterEntries } from '../api/behaviors';
+import { HeroesPanel } from '../features/heroes/HeroesPanel';
+import { unsupportedVbook } from '../features/heroes/heroModel';
+import type { UnsupportedVbook } from '../features/heroes/heroModel';
 import type {
-  AppConfig, BehaviorReaction, BookChapter, BookData, BookScene, BookUnit, CharPassport, SceneTiming, WaveformData,
+  AppConfig, BookChapter, BookData, BookScene, BookUnit, CharPassport, SceneTiming, WaveformData,
 } from '../api/models';
 import { t, tf } from '../app/i18n';
 import { navigate } from '../app/router';
@@ -44,26 +47,24 @@ import { navigateTo, position as positionSignal } from '../state/positionStore';
 import { seekToPosition, invalidateDeletedScene, invalidateDeletedChapter } from '@animastor/web-player';
 import { bookResource, emitLocal, onResourceInvalidated } from '../state/resourceInvalidations';
 import { resilientReload, sharedRecovery } from '../state/resilientReloader';
-import { Waveform, BehaviorAddDialog, DeleteConfirmDialog, ENTITY_SCHEMAS, EntityAddButton, EntityDeleteButton, EntityEditorDialog, StructureAddDialog, chapterId as genChapterId, sceneId as genSceneId, unitId as genUnitId } from '@animastor/web-editor';
+import { Waveform, DeleteConfirmDialog, ENTITY_SCHEMAS, EntityAddButton, EntityDeleteButton, EntityEditorDialog, StructureAddDialog, chapterId as genChapterId, sceneId as genSceneId, unitId as genUnitId } from '@animastor/web-editor';
 import type { EntityKind, StructureKind, StructureParentOption } from '@animastor/web-editor';
 import { editorPorts } from '../app/editorAdapters';
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconChevronUp, IconClock, IconClose, IconFullscreen, IconImageOff, IconPlay, IconReset, IconSave, IconStop } from '../app/icons';
 
 // ── Tabs (propertyTabs) — Global is the first level (mirrors the top-level
 //    book metadata in the JSON), then Chapter → Scene → Audio → Unit ("Модуль")
-//    → Characters/Voices/Behavior/Locations. Default to Unit (index 4) like
+//    → Heroes/Locations. Default to Unit (index 4) like
 //    EditFragment ──
-const TABS = ['edit_global_tab', 'edit_chapter_tab', 'edit_scene', 'edit_audio', 'edit_units_tab', 'edit_characters_tab', 'edit_voices_tab', 'edit_behavior_tab', 'edit_locations_tab'] as const;
+const TABS = ['edit_global_tab', 'edit_chapter_tab', 'edit_scene', 'edit_audio', 'edit_units_tab', 'edit_heroes_tab', 'edit_locations_tab'] as const;
 const DEFAULT_TAB = 4;
 const GLOBAL_TAB = 0;
 const CHAPTER_TAB = 1;
 const SCENE_TAB = 2;
 const AUDIO_TAB = 3;
 const UNITS_TAB = 4;
-const CHARS_TAB = 5;
-const VOICES_TAB = 6;
-const BEHAVIORS_TAB = 7;
-const LOCATIONS_TAB = 8;
+const HEROES_TAB = 5;
+const LOCATIONS_TAB = 6;
 
 const PASSPORT_OVERRIDE_FIELDS = ['appearance', 'clothes', 'video_tokens'];
 
@@ -222,14 +223,14 @@ export function EditPage(props: { path?: string }) {
   // Reload recovery notice ("retrying automatically…") — never an error wall;
   // content already on screen stays visible and usable underneath.
   const [updateNotice, setUpdateNotice] = useState(false);
+  // The book on the server is VBook 3.1 (or newer than this client): a
+  // dedicated screen state, not the generic load error (VBOOK_FORMAT_V4.md §9).
+  const [unsupported, setUnsupported] = useState<UnsupportedVbook | null>(null);
 
   // Entity Add/Delete (Characters / Locations / Voices tables) — one reusable
   // schema-driven pattern; both dialogs share the busy/error state since only
   // one is open at a time.
   const [entityAddKind, setEntityAddKind] = useState<EntityKind | null>(null);
-  // Behavior add uses a dedicated dialog (character dropdown — behavior.json
-  // is keyed by an existing character_id, not a free-form id).
-  const [behaviorAddOpen, setBehaviorAddOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ kind: EntityKind; id: string } | null>(null);
   const [entityBusy, setEntityBusy] = useState(false);
   const [entityError, setEntityError] = useState<string | null>(null);
@@ -316,6 +317,7 @@ export function EditPage(props: { path?: string }) {
     setPosLabel(t('navigate_no_position'));
     setErrorText(null);
     setUpdateNotice(false);
+    setUnsupported(null);
     setHasUnits(false);
     setUnitCountText('');
     stopPlaybackInternal();
@@ -373,12 +375,32 @@ export function EditPage(props: { path?: string }) {
       return;
     }
     setLoading(true);
+    // An unsupported book version is a final answer, not a network blip: it
+    // must not go through the retry backoff.
+    let wrongVersion: UnsupportedVbook | null = null;
     const result = await resilientReload({
       recovery: sharedRecovery(),
-      attempt: () => getJson<BookData>(`/book/${encodeURIComponent(bId)}`),
+      attempt: async () => {
+        try {
+          return await getJson<BookData>(`/book/${encodeURIComponent(bId)}`);
+        } catch (e) {
+          wrongVersion = unsupportedVbook(e);
+          if (wrongVersion) return null;
+          throw e;
+        }
+      },
       onRetry: () => setUpdateNotice(true),
     });
-    if (result.kind === 'success') {
+    if (wrongVersion) {
+      setUpdateNotice(false);
+      setBookData(null);
+      setErrorText(null);
+      setUnsupported(wrongVersion);
+      setLoading(false);
+      return;
+    }
+    if (result.kind === 'success' && result.value) {
+      setUnsupported(null);
       setUpdateNotice(false);
       setBookData(result.value);
       // snapshotCurrentBook() — fire-and-forget server snapshot (non-fatal).
@@ -1208,179 +1230,9 @@ export function EditPage(props: { path?: string }) {
       }
     }
 
-    // CHARACTERS tab — PATCH /characters/{id} per CHANGED char (name + passport).
-    if (tab === CHARS_TAB) {
-      setSaveLoading(true, true);
-      try {
-        const byChar = new Map<string, Record<string, string>>();
-        Object.entries(fv).forEach(([key, value]) => {
-          if (!key.startsWith('char.')) return;
-          const rest = key.slice(5); // drop 'char.'
-          const dot = rest.indexOf('.');
-          if (dot <= 0) return;
-          // Note: first-dot split mirrors Android's char.<id>.passport.* keys;
-          // ids containing '.' would mis-route (Android-parity limitation).
-          const charId = rest.slice(0, dot);
-          const fieldKey = rest.slice(dot + 1);
-          const m = byChar.get(charId) ?? {};
-          m[fieldKey] = value;
-          byChar.set(charId, m);
-        });
-        const chars = bd.characters ?? [];
-        let anyChanged = false;
-        for (const [charId, fields] of byChar) {
-          // Diff vs canonical data — skip untouched entities (GLOBAL-tab pattern).
-          const orig = chars.find((c) => c.id === charId);
-          // Skip entities deleted since the editor rendered (stale fieldValues).
-          if (!orig) continue;
-          const changed: Record<string, string> = {};
-          Object.entries(fields).forEach(([k, v]) => {
-            // passport.<field> keys must compare against the REAL field
-            // (p[field]); passportFieldText(p, 'passport.appearance') would look
-            // up p['passport.appearance'] — always '' — so clearing a field to
-            // empty never persisted and untouched fields were re-sent every save.
-            const oldVal = k === 'name'
-              ? (orig?.name ?? '')
-              : passportFieldText(orig?.passport as CharPassport | null, k.startsWith('passport.') ? k.slice('passport.'.length) : k);
-            if (v !== oldVal) changed[k] = v;
-          });
-          if (Object.keys(changed).length === 0) continue;
-          anyChanged = true;
-          await patchJson(`/book/${encodeURIComponent(bId)}/characters/${encodeURIComponent(charId)}`, { fields: changed });
-        }
-        if (!anyChanged) {
-          setSaveLoading(false, true);
-          saveDirtyRef.current = false;
-          setSaveDirty(false);
-          return true;
-        }
-        const fresh = await getJson<BookData>(`/book/${encodeURIComponent(bId)}`).catch(() => null);
-        if (fresh) applyFreshBook(fresh);
-        setSaveLoading(false, true);
-        setErrorText(null);
-        saveDirtyRef.current = false;
-        setSaveDirty(false);
-        return true;
-      } catch (e) {
-        showSaveError(`${(e as Error).name}: ${(e as Error).message || 'unknown'}`);
-        return false;
-      }
-    }
-
-    // VOICES tab — PATCH /voices/{id} per CHANGED voice (instruction).
-    if (tab === VOICES_TAB) {
-      setSaveLoading(true, true);
-      try {
-        const byVoice = new Map<string, Record<string, string>>();
-        Object.entries(fv).forEach(([key, value]) => {
-          if (!key.startsWith('voice.')) return;
-          const rest = key.slice(6); // drop 'voice.'
-          const dot = rest.indexOf('.');
-          if (dot <= 0) return;
-          const voiceId = rest.slice(0, dot);
-          const fieldKey = rest.slice(dot + 1);
-          const m = byVoice.get(voiceId) ?? {};
-          m[fieldKey] = value;
-          byVoice.set(voiceId, m);
-        });
-        const voices = bd.voices ?? {};
-        let anyChanged = false;
-        for (const [voiceId, fields] of byVoice) {
-          // Skip entities deleted since the editor rendered (stale fieldValues).
-          if (!(voiceId in voices)) continue;
-          const orig = voices[voiceId]?.instruction ?? '';
-          const changed: Record<string, string> = {};
-          Object.entries(fields).forEach(([k, v]) => {
-            if (v !== orig) changed[k] = v;
-          });
-          if (Object.keys(changed).length === 0) continue;
-          anyChanged = true;
-          await patchJson(`/book/${encodeURIComponent(bId)}/voices/${encodeURIComponent(voiceId)}`, { fields: changed });
-        }
-        if (!anyChanged) {
-          setSaveLoading(false, true);
-          saveDirtyRef.current = false;
-          setSaveDirty(false);
-          return true;
-        }
-        const fresh = await getJson<BookData>(`/book/${encodeURIComponent(bId)}`).catch(() => null);
-        if (fresh) applyFreshBook(fresh);
-        setSaveLoading(false, true);
-        setErrorText(null);
-        saveDirtyRef.current = false;
-        setSaveDirty(false);
-        return true;
-      } catch (e) {
-        showSaveError(`${(e as Error).name}: ${(e as Error).message || 'unknown'}`);
-        return false;
-      }
-    }
-
-    // BEHAVIORS tab — PATCH /behaviors/{characterId} per CHANGED entry,
-    // mirroring the VOICES_TAB branch. Behavior does not affect
-    // generation yet, so the PATCH is a plain edit (no dirty propagation).
-    if (tab === BEHAVIORS_TAB) {
-      setSaveLoading(true, true);
-      try {
-        const byChar = new Map<string, Record<string, string>>();
-        Object.entries(fv).forEach(([key, value]) => {
-          if (!key.startsWith('behavior.')) return;
-          const rest = key.slice('behavior.'.length);
-          const dot = rest.indexOf('.');
-          if (dot <= 0) return;
-          const charId = rest.slice(0, dot);
-          const fieldKey = rest.slice(dot + 1);
-          const m = byChar.get(charId) ?? {};
-          m[fieldKey] = value;
-          byChar.set(charId, m);
-        });
-        const behaviors = behaviorCharacterEntries(bd.behaviors);
-        let anyChanged = false;
-        for (const [charId, fields] of byChar) {
-          // Skip entities deleted since the editor rendered (stale fieldValues).
-          if (!(charId in behaviors)) continue;
-          const entry = behaviors[charId];
-          // Diff vs canonical entry: plain fields compare as text; quirks/
-          // reactions compare after round-tripping the stored JSON through the
-          // same line-based text the editor renders. An untouched card (the
-          // text equals the rendered form of the stored data) never PATCHes —
-          // so future per-reaction keys written by other tools survive.
-          const orig: Record<string, unknown> = {
-            baseline: entry?.baseline ?? '',
-            quirks: behaviorLinesToText(entry?.quirks),
-            reactions: behaviorReactionsToText(entry?.reactions),
-          };
-          const changed: Record<string, unknown> = {};
-          Object.entries(fields).forEach(([k, v]) => {
-            if (v !== orig[k]) changed[k] = v;
-          });
-          if (Object.keys(changed).length === 0) continue;
-          anyChanged = true;
-          // Structured fields are serialized here (the PATCH body carries real
-          // JSON arrays); 'quirks'/'reactions' text → arrays, null when empty
-          // (clears the field like the voice PATCH does).
-          if ('quirks' in changed) changed.quirks = behaviorTextToLines(changed.quirks as string);
-          if ('reactions' in changed) changed.reactions = parseBehaviorReactionsText(changed.reactions as string);
-          await patchJson(`/book/${encodeURIComponent(bId)}/behaviors/${encodeURIComponent(charId)}`, { fields: changed });
-        }
-        if (!anyChanged) {
-          setSaveLoading(false, true);
-          saveDirtyRef.current = false;
-          setSaveDirty(false);
-          return true;
-        }
-        const fresh = await getJson<BookData>(`/book/${encodeURIComponent(bId)}`).catch(() => null);
-        if (fresh) applyFreshBook(fresh);
-        setSaveLoading(false, true);
-        setErrorText(null);
-        saveDirtyRef.current = false;
-        setSaveDirty(false);
-        return true;
-      } catch (e) {
-        showSaveError(`${(e as Error).name}: ${(e as Error).message || 'unknown'}`);
-        return false;
-      }
-    }
+    // HEROES tab — the hero sheet saves itself (one PATCH /heroes/{id} per
+    // card, features/heroes); the page-level Save has nothing to send.
+    if (tab === HEROES_TAB) return true;
 
     const ch = chapters[currentChIndex];
     const sc = currentScene();
@@ -1580,7 +1432,7 @@ export function EditPage(props: { path?: string }) {
   }, [applyFreshBook]);
 
   const entityCollection = useCallback((kind: EntityKind): string =>
-    kind === 'character' ? 'characters' : kind === 'location' ? 'locations' : kind === 'behavior' ? 'behaviors' : 'voices', []);
+    kind === 'location' ? 'locations' : `${kind}s`, []);
 
   const buildCreateBody = useCallback((kind: EntityKind, values: Record<string, string>): Record<string, unknown> => {
     const body: Record<string, unknown> = {};
@@ -1627,36 +1479,6 @@ export function EditPage(props: { path?: string }) {
     }
   }, [entityCollection, buildCreateBody, refreshBook]);
 
-  // ── Behavior add — POST /behaviors with the selected existing character.
-  //     The dialog offers only characters without a behavior yet (the server
-  //     rejects duplicates with 409). ──
-  const behaviorCharacters = useMemo(() => {
-    const bd = bookData;
-    const behaviors = behaviorCharacterEntries(bd?.behaviors);
-    return (bd?.characters ?? [])
-      .filter((c) => c.id && !(c.id in behaviors))
-      .map((c) => ({ id: c.id as string, name: c.name ?? '' }));
-  }, [bookData]);
-
-  const saveBehavior = useCallback(async (values: { characterId: string; baseline: string }) => {
-    const bId = bookIdSignal.value;
-    if (!bId) return;
-    setEntityBusy(true);
-    setEntityError(null);
-    try {
-      await postJson(`/book/${encodeURIComponent(bId)}/behaviors`, {
-        character_id: values.characterId,
-        baseline: values.baseline,
-      });
-      setBehaviorAddOpen(false);
-      await refreshBook();
-    } catch (e) {
-      setEntityError((e as Error).message);
-    } finally {
-      setEntityBusy(false);
-    }
-  }, [refreshBook]);
-
   const confirmDeleteEntity = useCallback(async () => {
     const target = deleteTarget;
     const bId = bookIdSignal.value;
@@ -1677,9 +1499,7 @@ export function EditPage(props: { path?: string }) {
   const entityExistingIds = useMemo(() => {
     const bd = bookData;
     if (!bd) return new Set<string>();
-    if (entityAddKind === 'character') return new Set((bd.characters ?? []).map((c) => c.id ?? ''));
-    if (entityAddKind === 'location') return new Set(Object.keys(bd.locations ?? {}));
-    return new Set(Object.keys(bd.voices ?? {}));
+    return new Set(Object.keys(bd.locations ?? {}));
   }, [bookData, entityAddKind]);
 
   // ── Structure add/delete (chapters / scenes / units) ──
@@ -1826,9 +1646,9 @@ export function EditPage(props: { path?: string }) {
     }
   }, [structureDelete, applyFreshBook]);
 
-  const isEntityTab = tab === CHARS_TAB || tab === VOICES_TAB || tab === LOCATIONS_TAB || tab === BEHAVIORS_TAB;
+  const isEntityTab = tab === LOCATIONS_TAB;
   const isStructureTab = tab === CHAPTER_TAB || tab === SCENE_TAB || tab === UNITS_TAB;
-  const currentEntityKind: EntityKind = tab === CHARS_TAB ? 'character' : tab === LOCATIONS_TAB ? 'location' : tab === BEHAVIORS_TAB ? 'behavior' : 'voice';
+  const currentEntityKind: EntityKind = 'location';
 
   // ── Content builders ──
 
@@ -1988,79 +1808,17 @@ export function EditPage(props: { path?: string }) {
     return out;
   };
 
-  const buildCharactersFields = (): JSX.Element[] => {
-    const characters = bookData?.characters ?? [];
-    if (characters.length === 0) {
-      return [<div class="edit-empty-inline" key="empty">{t('edit_no_characters')}</div>];
-    }
-    return characters.map((ch) => {
-      const charId = ch.id ?? '';
-      // char.<id>.name / char.<id>.passport.<field> — per-character store keys
-      // (Android EditFragment uses the same prefix pattern).
-      return (
-        <div class="edit-card" key={charId || 'char'}>
-          {/* Delete on the LEFT so the floating "+" (top-right corner of the
-              table) never sits on top of the first row's delete button. */}
-          <div class="edit-card__head">
-            <EntityDeleteButton ports={editorPorts} onClick={() => { setEntityError(null); setDeleteTarget({ kind: 'character', id: charId }); }} />
-            <span class="edit-card__title">{charId || '—'}</span>
-          </div>
-          {inputCard(t('field_name'), ch.name ?? '', false, `char.${charId}.name`)}
-          <div class="edit-section">{t('field_passport')}</div>
-          {PASSPORT_OVERRIDE_FIELDS.map((f) => {
-            const v = passportFieldText(ch.passport as CharPassport | null, f);
-            return inputCard(passportFieldLabel(f), v, v.length > 80, `char.${charId}.passport.${f}`);
-          })}
-        </div>
-      );
-    });
-  };
-
-  const buildVoicesFields = (): JSX.Element[] => {
-    const voices = bookData?.voices ?? {};
-    const entries = Object.entries(voices);
-    if (entries.length === 0) {
-      return [<div class="edit-empty-inline" key="empty">{t('edit_no_voices')}</div>];
-    }
-    return entries.map(([voiceId, entry]) => (
-      <div class="edit-card" key={voiceId}>
-        <div class="edit-card__head">
-          <EntityDeleteButton ports={editorPorts} onClick={() => { setEntityError(null); setDeleteTarget({ kind: 'voice', id: voiceId }); }} />
-          <span class="edit-card__title">{voiceId}</span>
-        </div>
-        {inputCard(t('field_instruction'), entry?.instruction ?? '', (entry?.instruction?.length ?? 0) > 80, `voice.${voiceId}.instruction`)}
-      </div>
-    ));
-  };
-
-  // Behaviors tab — one card per behavior, keyed by character_id (behavior.json
-  // mirrors voices.json); the card title shows the character's name when known.
-  // Structured fields (schema v2.1): baseline is plain text; quirks/reactions
-  // are edited as line-based text (behaviorLinesToText /
-  // behaviorReactionsToText round-trip rules).
-  const buildBehaviorsFields = (): JSX.Element[] => {
-    const behaviors = behaviorCharacterEntries(bookData?.behaviors);
-    const entries = Object.entries(behaviors);
-    if (entries.length === 0) {
-      return [<div class="edit-empty-inline" key="empty">{t('edit_no_behaviors')}</div>];
-    }
-    const chars = bookData?.characters ?? [];
-    return entries.map(([charId, entry]) => {
-      const ch = chars.find((c) => c.id === charId);
-      const title = ch?.name ? `${charId} — ${ch.name}` : charId;
-      return (
-        <div class="edit-card" key={charId}>
-          <div class="edit-card__head">
-            <EntityDeleteButton ports={editorPorts} onClick={() => { setEntityError(null); setDeleteTarget({ kind: 'behavior', id: charId }); }} />
-            <span class="edit-card__title">{title}</span>
-          </div>
-          {inputCard(t('field_baseline'), entry?.baseline ?? '', (entry?.baseline?.length ?? 0) > 80, `behavior.${charId}.baseline`)}
-          {inputCard(t('field_quirks'), behaviorLinesToText(entry?.quirks), true, `behavior.${charId}.quirks`)}
-          {inputCard(t('field_reactions'), behaviorReactionsToText(entry?.reactions), true, `behavior.${charId}.reactions`)}
-        </div>
-      );
-    });
-  };
+  // Heroes tab — grid of hero cards + the hero sheet (features/heroes). It
+  // replaces the Characters / Voices / Behavior tabs: one hero = one card.
+  const buildHeroesPanel = (): JSX.Element => (
+    <HeroesPanel
+      bookId={bid}
+      heroes={bookData?.heroes}
+      globals={bookData?.behaviour ?? null}
+      issues={bookData?.hero_issues}
+      onChanged={refreshBook}
+    />
+  );
 
   const buildLocationsFields = (): JSX.Element[] => {
     const locations = bookData?.locations ?? bookData?.bible?.locations ?? {};
@@ -2181,10 +1939,8 @@ export function EditPage(props: { path?: string }) {
   // ── Tab content (rebuildContent) ──
   const renderContent = (): JSX.Element => {
     if (tab === CHAPTER_TAB) return <>{buildChapterFields(chapters[currentChIndex])}</>;
-    if (tab === CHARS_TAB) return <>{buildCharactersFields()}</>;
-    if (tab === VOICES_TAB) return <>{buildVoicesFields()}</>;
+    if (tab === HEROES_TAB) return buildHeroesPanel();
     if (tab === LOCATIONS_TAB) return <>{buildLocationsFields()}</>;
-    if (tab === BEHAVIORS_TAB) return <>{buildBehaviorsFields()}</>;
     if (tab === GLOBAL_TAB) return <>{buildGlobalFields()}</>;
     const sc = currentScene();
     if (!sc) return <div class="edit-empty-inline" />;
@@ -2457,8 +2213,7 @@ export function EditPage(props: { path?: string }) {
             <div class="edit-entity-table">
               <EntityAddButton ports={editorPorts} onClick={() => {
                 setEntityError(null);
-                if (tab === BEHAVIORS_TAB) setBehaviorAddOpen(true);
-                else if (isStructureTab) openStructureAdd(tab === CHAPTER_TAB ? 'chapter' : tab === SCENE_TAB ? 'scene' : 'unit');
+                if (isStructureTab) openStructureAdd(tab === CHAPTER_TAB ? 'chapter' : tab === SCENE_TAB ? 'scene' : 'unit');
                 else setEntityAddKind(currentEntityKind);
               }} />
               {renderContent()}
@@ -2469,7 +2224,7 @@ export function EditPage(props: { path?: string }) {
       </div>
 
       {/* Bottom save row */}
-      <div class="edit-bottom">
+      <div class="edit-bottom" hidden={tab === HEROES_TAB}>
         <button
           class="edit-save"
           type="button"
@@ -2496,6 +2251,14 @@ export function EditPage(props: { path?: string }) {
 
       {/* Empty state */}
       {!bid && !loading && <div class="edit-empty">{t('no_book_loaded')}</div>}
+
+      {/* Unsupported book format (VBook 3.1) — the editor has nothing to show */}
+      {bid && !loading && unsupported && (
+        <div class="edit-empty edit-empty--unsupported" role="alert">
+          <strong>{t('vbook_unsupported_title')}</strong>
+          <span>{tf('vbook_unsupported_body', unsupported.version, unsupported.supported)}</span>
+        </div>
+      )}
 
       {/* Full-size image zoom dialog (backdrop click / Escape / X closes) */}
       {zoom && (
@@ -2543,19 +2306,6 @@ export function EditPage(props: { path?: string }) {
           error={entityError}
           onSave={(values) => void saveEntity(entityAddKind, values)}
           onClose={() => { if (!entityBusy) { setEntityAddKind(null); setEntityError(null); } }}
-        />
-      )}
-
-      {/* Behavior add dialog — picks an existing character without a behavior
-          yet (behavior.json is keyed by character_id, not a free-form id). */}
-      {behaviorAddOpen && (
-        <BehaviorAddDialog
-          ports={editorPorts}
-          characters={behaviorCharacters}
-          busy={entityBusy}
-          error={entityError}
-          onSave={(values) => void saveBehavior(values)}
-          onClose={() => { if (!entityBusy) { setBehaviorAddOpen(false); setEntityError(null); } }}
         />
       )}
 
@@ -2639,37 +2389,6 @@ export function EditPage(props: { path?: string }) {
       )}
     </section>
   );
-}
-
-// ── Behavior structured fields (schema v2) — line-based editor text ⇆ JSON ──
-// Identical rules on web and Android: quirks — one per line; reactions —
-// one pattern per line "trigger → reaction" ("→" or "->", earliest separator
-// wins; a line without a separator keeps the whole text as trigger with an
-// empty reaction). Untouched text never produces a PATCH (see BEHAVIORS_TAB).
-function behaviorLinesToText(quirks: string[] | null | undefined): string {
-  return (quirks ?? []).join('\n');
-}
-
-function behaviorTextToLines(text: string): string[] {
-  return text.split('\n').map((s) => s.trim()).filter((s) => s.length > 0);
-}
-
-function behaviorReactionsToText(reactions: BehaviorReaction[] | null | undefined): string {
-  return (reactions ?? []).map((r) => {
-    const trigger = (r.trigger ?? '').trim();
-    const reaction = (r.reaction ?? '').trim();
-    return reaction ? `${trigger} → ${reaction}` : trigger;
-  }).join('\n');
-}
-
-function parseBehaviorReactionsText(text: string): BehaviorReaction[] {
-  return behaviorTextToLines(text).map((line) => {
-    const seps = [line.indexOf('→'), line.indexOf('->')].filter((i) => i >= 0);
-    if (seps.length === 0) return { trigger: line, reaction: null };
-    const at = Math.min(...seps);
-    const sepLen = line[at] === '→' ? 1 : 2;
-    return { trigger: line.slice(0, at).trim(), reaction: line.slice(at + sepLen).trim() || null };
-  });
 }
 
 function dirtyIndicatorText(dirty: { changed?: number; added?: number; removed?: number }): string {

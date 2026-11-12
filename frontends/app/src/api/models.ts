@@ -328,17 +328,19 @@ export interface UnitVideo {
   action?: string | null;
 }
 
+import type { BehaviourGlobals, Hero, HeroIssue } from '../features/heroes/heroModel';
+
 export interface BookData {
   manifest?: BookManifest | null;
   book?: BookMeta | null;
   bible?: BookBible | null;
   chapters?: BookChapter[] | null;
-  characters?: BookCharacter[] | null;
-  voices?: Record<string, BookVoiceEntry> | null;
-  /** Flat character map (API projection of behavior.json v2); read via behaviorCharacterEntries(). */
-  behaviors?: Record<string, BookBehaviorEntry> | null;
-  /** Read-only behaviour rules (behavior.json v2 `rules`); no UI in phase 0. */
-  behavior_rules?: BookBehaviorRule[] | null;
+  /** VBook v4: one object per hero (characters/<id>.json) — features/heroes/heroModel. */
+  heroes?: Hero[] | null;
+  /** Hero files the loader could not use + warnings (VBOOK_FORMAT_V4.md §10.3). */
+  hero_issues?: HeroIssue[] | null;
+  /** Global behaviour document (behaviour.json): defaults + global rules. */
+  behaviour?: BehaviourGlobals | null;
   locations?: Record<string, BookLocation> | null;
   /** Server-computed flat scene list (thin-client contract) — preferred over traversal. */
   scene_list?: { chapter_id?: string | null; scene_id?: string | null; type?: string | null }[] | null;

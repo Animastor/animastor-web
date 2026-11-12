@@ -3,6 +3,8 @@
 //  - retryWithBackoff (3 attempts, 1s→2s, cap 5s) like PlaybackViewModel.retryWithBackoff,
 //  - SSE client for generation progress (ProgressStream.kt equivalent),
 //  - streaming Blob download for audio/video/image.
+import { tf } from '../app/i18n';
+
 export const API_BASE = '/api/v1';
 const REQUEST_TIMEOUT_MS = 30_000; // OkHttp default read timeout
 // Long-running endpoints (POST /bootstrap, /bootstrap-next-window) block for the
@@ -61,6 +63,11 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs: numbe
       let msg = res.statusText;
       let body: unknown;
       try { body = await res.json(); msg = (body as any)?.error || (body as any)?.message || msg; } catch { /* ignore */ }
+      // VBook 3.1 book (open or import): every screen that prints e.message
+      // shows the same clear text instead of the machine code.
+      if ((body as any)?.error === 'unsupported_vbook_version') {
+        msg = tf('vbook_unsupported_body', String((body as any)?.vbook_version ?? '?'), Number((body as any)?.supported ?? 4));
+      }
       throw new ApiError(msg, res.status, undefined, body);
     }
     if (res.status === 204) return undefined as T;
@@ -194,6 +201,12 @@ export async function postMultipart<T>(path: string, file: File | Blob, fieldNam
 // path is the endpoint-relative path WITH query string (e.g. build_id).
 export function mediaUrl(path: string): string {
   return API_BASE + path;
+}
+
+// Multipart POST with arbitrary form fields (hero reference uploads: the file
+// plus ref_text / kind). Same error contract as request().
+export async function postForm<T>(path: string, form: FormData): Promise<T> {
+  return request<T>(path, { method: 'POST', body: form }, BLOB_TIMEOUT_MS);
 }
 
 // retryWithBackoff — numeric backoff 1s→2s→… capped at 5s, 3 attempts total
