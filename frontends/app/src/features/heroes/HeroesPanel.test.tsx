@@ -211,6 +211,16 @@ describe('hero sheet', () => {
     expect(fieldByLabel(container, 'тембр').value).toContain('warm low baritone');
   });
 
+  it('with a pinned reference the manner hint says it no longer shapes the sound', async () => {
+    const { container } = await openYura();
+    expect(container.textContent).toContain('манера на звук не влияет');
+    cleanup();
+    const free = mount([shopWomen, narrator]);
+    fireEvent.click(tile(free.container, 'Женщина в будочке'));
+    await waitFor(() => expect(free.container.querySelector('.hero-sheet')).not.toBeNull());
+    expect(free.container.textContent).not.toContain('манера на звук не влияет');
+  });
+
   it('a missing reference file is shown instead of the player', async () => {
     const lost: Hero = { ...yura, voice: { ...yura.voice!, reference_state: 'missing' } };
     const { container } = mount([lost, narrator]);

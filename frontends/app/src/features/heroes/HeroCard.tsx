@@ -260,7 +260,7 @@ export function HeroCard({ bookId, hero, heroes, globals, issues, onChanged, onC
           >
             {draft.hasVoice ? [
               <Field key="t" label={t('hero_field_timbre')} hint={t('hero_field_timbre_hint')} value={draft.timbre} multiline rows={2} onInput={(v) => set('timbre', v)} />,
-              <Field key="m" label={t('hero_field_manner')} hint={t('hero_field_manner_hint')} value={draft.manner} multiline rows={2} onInput={(v) => set('manner', v)} />,
+              <Field key="m" label={t('hero_field_manner')} hint={t(referenceStatus(hero.voice) === 'pinned' ? 'hero_field_manner_pinned_hint' : 'hero_field_manner_hint')} value={draft.manner} multiline rows={2} onInput={(v) => set('manner', v)} />,
               <button key="p" class="hero-link" type="button" onClick={() => setShowInstruct((s) => !s)}>{t('hero_voice_instruct_preview')}</button>,
               showInstruct && <pre key="i" class="hero-instruct">{voiceInstruct({ timbre: draft.timbre, manner: draft.manner }) || '—'}</pre>,
               hero.voice
