@@ -89,6 +89,8 @@ const NO_STORE_GET_PATHS: readonly RegExp[] = [
   /^\/worker\/counts(?:[/?]|$)/,
   // v2 generation API (/generate/*), present and future
   /^\/generate(?:[/?]|$)/,
+  // voice references (VOICE_REFERENCES.md) — polled while candidates are generated
+  /^\/book\/[^/?]+\/voices\/references(?:[/?]|$)/,
 ];
 
 /** `true` when a GET of `path` must bypass the browser HTTP cache (polls,
@@ -180,6 +182,11 @@ export async function getBlob(path: string, signal?: AbortSignal, onProgress?: (
   } finally {
     clear();
   }
+}
+
+/** Raw body upload (e.g. an audio sample) — the server reads the bytes as sent. */
+export async function postRaw<T>(path: string, body: Blob, contentType: string, timeoutMs: number = 120_000): Promise<T> {
+  return request<T>(path, { method: 'POST', body, headers: { 'Content-Type': contentType } }, timeoutMs);
 }
 
 export async function postMultipart<T>(path: string, file: File | Blob, fieldName: string = 'file', filename: string = 'upload.vbook'): Promise<T> {

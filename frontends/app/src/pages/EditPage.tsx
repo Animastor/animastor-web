@@ -46,6 +46,7 @@ import { resilientReload, sharedRecovery } from '../state/resilientReloader';
 import { Waveform, BehaviorAddDialog, DeleteConfirmDialog, ENTITY_SCHEMAS, EntityAddButton, EntityDeleteButton, EntityEditorDialog, StructureAddDialog, chapterId as genChapterId, sceneId as genSceneId, unitId as genUnitId } from '@animastor/web-editor';
 import type { EntityKind, StructureKind, StructureParentOption } from '@animastor/web-editor';
 import { editorPorts } from '../app/editorAdapters';
+import { VoiceReferencesBlock } from '../features/voices/VoiceReferencesBlock';
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconChevronUp, IconClock, IconClose, IconFullscreen, IconImageOff, IconPlay, IconReset, IconSave, IconStop } from '../app/icons';
 
 // ── Tabs (propertyTabs) — Global is the first level (mirrors the top-level
@@ -1266,7 +1267,7 @@ export function EditPage(props: { path?: string }) {
       }
     }
 
-    // VOICES tab — PATCH /voices/{id} per CHANGED voice (instruction).
+    // VOICES tab — PATCH /voices/{id} per CHANGED voice (timbre / manner).
     if (tab === VOICES_TAB) {
       setSaveLoading(true, true);
       try {
@@ -1287,10 +1288,11 @@ export function EditPage(props: { path?: string }) {
         for (const [voiceId, fields] of byVoice) {
           // Skip entities deleted since the editor rendered (stale fieldValues).
           if (!(voiceId in voices)) continue;
-          const orig = voices[voiceId]?.instruction ?? '';
+          const entry = voices[voiceId] ?? {};
           const changed: Record<string, string> = {};
           Object.entries(fields).forEach(([k, v]) => {
-            if (v !== orig) changed[k] = v;
+            const orig = k === 'timbre' ? entry.timbre ?? '' : k === 'manner' ? entry.manner ?? '' : null;
+            if (orig !== null && v !== orig) changed[k] = v;
           });
           if (Object.keys(changed).length === 0) continue;
           anyChanged = true;
@@ -1604,8 +1606,10 @@ export function EditPage(props: { path?: string }) {
       });
       if (Object.keys(env).length > 0) body.environment = env;
     } else {
-      const instruction = (values.instruction ?? '').trim();
-      if (instruction) body.instruction = instruction;
+      const timbre = (values.timbre ?? '').trim();
+      const manner = (values.manner ?? '').trim();
+      if (timbre) body.timbre = timbre;
+      if (manner) body.manner = manner;
     }
     return body;
   }, []);
@@ -2018,18 +2022,21 @@ export function EditPage(props: { path?: string }) {
   const buildVoicesFields = (): JSX.Element[] => {
     const voices = bookData?.voices ?? {};
     const entries = Object.entries(voices);
+    const refsBlock = bookIdSignal.value ? [<VoiceReferencesBlock key="voice-references" bookId={bookIdSignal.value} />] : [];
     if (entries.length === 0) {
       return [<div class="edit-empty-inline" key="empty">{t('edit_no_voices')}</div>];
     }
-    return entries.map(([voiceId, entry]) => (
+    return [...refsBlock, ...entries.map(([voiceId, entry]) => (
       <div class="edit-card" key={voiceId}>
         <div class="edit-card__head">
           <EntityDeleteButton ports={editorPorts} onClick={() => { setEntityError(null); setDeleteTarget({ kind: 'voice', id: voiceId }); }} />
           <span class="edit-card__title">{voiceId}</span>
         </div>
-        {inputCard(t('field_instruction'), entry?.instruction ?? '', (entry?.instruction?.length ?? 0) > 80, `voice.${voiceId}.instruction`)}
+        {inputCard(t('field_timbre'), entry?.timbre ?? '', (entry?.timbre?.length ?? 0) > 80, `voice.${voiceId}.timbre`)}
+        {entry?.timbre_source === 'cleaned' && <div class="voice-refs__hint">{t('voice_ref_cleaned_hint')}</div>}
+        {inputCard(t('field_manner'), entry?.manner ?? '', (entry?.manner?.length ?? 0) > 80, `voice.${voiceId}.manner`)}
       </div>
-    ));
+    ))];
   };
 
   // Behaviors tab — one card per behavior, keyed by character_id (behavior.json
