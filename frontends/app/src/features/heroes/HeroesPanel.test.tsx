@@ -14,6 +14,10 @@ vi.mock('./heroApi', async (orig) => {
     createRule: vi.fn(async () => ({})),
     patchRule: vi.fn(async () => ({})),
     deleteRule: vi.fn(async () => ({})),
+    createLook: vi.fn(async () => ({ look_id: 'wounded' })),
+    patchLook: vi.fn(async () => ({})),
+    deleteLook: vi.fn(async () => ({})),
+    assignLook: vi.fn(async () => ({})),
     listVoiceCandidates: vi.fn(async () => ({ candidates: [] })),
     designVoiceCandidates: vi.fn(async () => ({})),
     uploadVoiceCandidate: vi.fn(async () => ({})),
@@ -28,15 +32,16 @@ vi.mock('./heroApi', async (orig) => {
 import { ApiError } from '../../api/client';
 import * as api from './heroApi';
 import { HeroesPanel } from './HeroesPanel';
-import { globals, narrator, shopWomen, yura } from './heroFixtures';
+import { chapters, globals, narrator, shopWomen, yura } from './heroFixtures';
 import type { Hero } from './heroModel';
 
 const mock = <K extends keyof typeof api>(name: K) => api[name] as unknown as ReturnType<typeof vi.fn>;
 
 function mount(heroes: Hero[] = [yura, narrator, shopWomen], issues: unknown[] = []) {
   const onChanged = vi.fn(async () => {});
-  const view = render(<HeroesPanel bookId="b1" heroes={heroes} globals={globals} issues={issues} onChanged={onChanged} />);
-  return { ...view, onChanged };
+  const onNavigate = vi.fn();
+  const view = render(<HeroesPanel bookId="b1" heroes={heroes} globals={globals} issues={issues} chapters={chapters} onNavigate={onNavigate} onChanged={onChanged} />);
+  return { ...view, onChanged, onNavigate };
 }
 
 const tile = (c: Element, name: string): HTMLElement =>
@@ -235,6 +240,7 @@ describe('hero sheet', () => {
     await waitFor(() => expect(container.querySelector('.hero-sheet')).not.toBeNull());
     const titles = [...container.querySelectorAll('.hero-section__title')].map((n) => n.textContent);
     expect(titles).toEqual(['Голос']);
+    expect(container.querySelector('.hero-looks')).toBeNull();
     expect(button(container, 'Удалить героя')).toBeUndefined();
     expect(button(container, 'Убрать')).toBeUndefined();
   });
@@ -249,3 +255,121 @@ describe('hero sheet', () => {
     expect(container.querySelector('.hero-grid')).not.toBeNull();
   });
 });
+
+describe('hero looks', () => {
+  async function openYura() {
+    const view = mount();
+    fireEvent.click(tile(view.container, 'Юра'));
+    await waitFor(() => expect(view.container.querySelector('.hero-looks')).not.toBeNull());
+    return view;
+  }
+  const slot = (c: Element, name: string): HTMLElement =>
+    [...c.querySelectorAll<HTMLElement>('.hero-look-slot')].find((el) => el.textContent?.includes(name))!;
+  const stat = (c: Element, field: string): HTMLElement => c.querySelector(`.hero-look-stat[data-field="${field}"]`)!;
+
+  it('slots: the base first, then the looks with where they are used', async () => {
+    const { container } = await openYura();
+    const slots = [...container.querySelectorAll('.hero-look-slot')].map((s) => s.textContent);
+    expect(slots).toEqual(['Базовыйглобальный паспорт', 'В пальтомест: 1', 'С бородоймест: 1', 'Новый облик']);
+  });
+
+  it('the base look is read-only and has nothing highlighted', async () => {
+    const { container } = await openYura();
+    expect(container.querySelectorAll('.hero-look-stat--changed').length).toBe(0);
+    expect(stat(container, 'clothes').textContent).toContain('worn brown leather jacket');
+    expect(container.querySelector('.hero-look textarea')).toBeNull();
+    expect(container.querySelector('.hero-look__places')?.textContent).toContain('Дома'); // scene forced back to base
+  });
+
+  it('a look highlights the changed fields and keeps the base value visible', async () => {
+    const { container } = await openYura();
+    fireEvent.click(slot(container, 'В пальто'));
+    expect([...container.querySelectorAll('.hero-look-stat--changed')].map((e) => e.getAttribute('data-field'))).toEqual(['clothes', 'video_tokens']);
+    expect(stat(container, 'clothes').textContent).toContain('базовое: worn brown leather jacket');
+    expect(stat(container, 'appearance').querySelector('textarea')!.getAttribute('placeholder')).toContain('short dark hair');
+    expect(container.querySelector('.hero-look__image')?.textContent).toContain('Место под референс облика');
+  });
+
+  it('«where in effect» goes to the chapter or scene', async () => {
+    const { container, onNavigate } = await openYura();
+    fireEvent.click(slot(container, 'С бородой'));
+    fireEvent.click(button(container.querySelector('.hero-look__places')!, 'Зима'));
+    expect(onNavigate).toHaveBeenCalledWith('ch-000003', 'sc-000031');
+    fireEvent.click(slot(container, 'В пальто'));
+    fireEvent.click(button(container.querySelector('.hero-look__places')!, 'Глава 2'));
+    expect(onNavigate).toHaveBeenCalledWith('ch-000002', null);
+  });
+
+  it('saving a look sends only its changes; rename is the same PATCH', async () => {
+    const { container, onChanged } = await openYura();
+    fireEvent.click(slot(container, 'В пальто'));
+    expect(button(container, 'Сохранить облик').disabled).toBe(true);
+    fireEvent.input(fieldByLabel(container.querySelector('.hero-look')!, 'название'), { target: { value: 'В сером пальто' } });
+    fireEvent.input(stat(container, 'appearance').querySelector('textarea')!, { target: { value: 'grey temples' } });
+    fireEvent.click(button(container, 'Сохранить облик'));
+    await waitFor(() => expect(mock('patchLook')).toHaveBeenCalledWith('b1', 'yura', 'coat', { label: 'В сером пальто', 'fields.appearance': 'grey temples' }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(mock('patchHero')).not.toHaveBeenCalled();
+  });
+
+  it('a look cannot be saved empty', async () => {
+    const { container } = await openYura();
+    fireEvent.click(slot(container, 'С бородой'));
+    fireEvent.input(stat(container, 'appearance').querySelector('textarea')!, { target: { value: '' } });
+    expect(container.textContent).toContain('Облик должен менять хотя бы одно поле.');
+    expect(button(container, 'Сохранить облик').disabled).toBe(true);
+  });
+
+  it('create: label + at least one field; the new look is selected', async () => {
+    const { container } = await openYura();
+    fireEvent.click(slot(container, 'Новый облик'));
+    const modal = document.querySelector('.modal')!;
+    expect(button(modal, 'Сохранить').disabled).toBe(true);
+    fireEvent.input(fieldByLabel(modal, 'название'), { target: { value: 'Раненый' } });
+    expect(button(modal, 'Сохранить').disabled).toBe(true);
+    fireEvent.input(fieldByLabel(modal, 'внешность'), { target: { value: 'bandaged left arm' } });
+    fireEvent.input(fieldByLabel(modal, 'id'), { target: { value: 'base' } });
+    expect(modal.textContent).toContain('Id «base» занят базовым паспортом.');
+    fireEvent.input(fieldByLabel(modal, 'id'), { target: { value: '' } });
+    fireEvent.click(button(modal, 'Сохранить'));
+    await waitFor(() => expect(mock('createLook')).toHaveBeenCalledWith('b1', 'yura', { label: 'Раненый', fields: { appearance: 'bandaged left arm' } }));
+  });
+
+  it('assign: scenes are offered only where the hero takes part; the diff is sent', async () => {
+    const { container } = await openYura();
+    fireEvent.click(slot(container, 'В пальто'));
+    fireEvent.click(button(container, 'Назначить'));
+    const modal = document.querySelector('.modal')!;
+    const rows = [...modal.querySelectorAll<HTMLLabelElement>('.hero-assign__row')];
+    expect(rows.map((r) => r.textContent)).toEqual(['Пролог', 'сцена 1', 'Глава 2', 'сцена 1', 'Дома', 'Зима', 'сцена 1']);
+    const box = (i: number) => rows[i].querySelector('input') as HTMLInputElement;
+    expect(rows.map((_, i) => box(i).checked)).toEqual([false, false, true, false, false, false, false]);
+    fireEvent.click(box(2)); // release chapter 2
+    fireEvent.click(box(5)); // assign chapter 3
+    fireEvent.click(button(modal, 'Применить'));
+    await waitFor(() => expect(mock('assignLook')).toHaveBeenCalledTimes(2));
+    expect(mock('assignLook').mock.calls).toEqual([
+      ['b1', 'yura', null, { chapters: ['ch-000002'], scenes: [] }],
+      ['b1', 'yura', 'coat', { chapters: ['ch-000003'], scenes: [] }],
+    ]);
+  });
+
+  it('delete asks first and says how many places lose the look', async () => {
+    const { container } = await openYura();
+    fireEvent.click(slot(container, 'В пальто'));
+    fireEvent.click(button(container, 'Удалить облик'));
+    const modal = document.querySelector('.modal')!;
+    expect(modal.textContent).toContain('мест: 1');
+    expect(mock('deleteLook')).not.toHaveBeenCalled();
+    fireEvent.click(button(modal, 'Удалить'));
+    await waitFor(() => expect(mock('deleteLook')).toHaveBeenCalledWith('b1', 'yura', 'coat'));
+  });
+
+  it('a hero without a passport has no looks section', async () => {
+    const { container } = mount();
+    fireEvent.click(tile(container, 'Женщина в будочке'));
+    await waitFor(() => expect(container.querySelector('.hero-sheet')).not.toBeNull());
+    expect(container.querySelector('.hero-looks')).toBeNull();
+  });
+});
+

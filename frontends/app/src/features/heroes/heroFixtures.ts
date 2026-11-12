@@ -1,6 +1,6 @@
 // Shared hero fixtures — the same objects as animastor-docs
 // architecture/schemas/examples/*.json (Android HeroModelTest uses them too).
-import type { BehaviourGlobals, Hero } from './heroModel';
+import type { BehaviourGlobals, Hero, LookChapter } from './heroModel';
 
 export const yura: Hero = {
   schema: 'animastor.character/1',
@@ -13,6 +13,10 @@ export const yura: Hero = {
     clothes: 'worn brown leather jacket',
     video_tokens: ['man', 'dark hair', 'leather jacket'],
   },
+  looks: [
+    { id: 'coat', label: 'В пальто', fields: { clothes: 'long dark grey wool coat', video_tokens: ['man', 'grey coat'] }, image_ref: null },
+    { id: 'beard', label: 'С бородой', fields: { appearance: 'man in his early thirties, thick dark beard' }, image_ref: null },
+  ],
   voice: {
     timbre: 'A Russian male voice in his early thirties, warm low baritone.',
     manner: 'Speaks unhurriedly, pauses before important words.',
@@ -68,3 +72,18 @@ export const globals: BehaviourGlobals = {
   defaults: { max_per_scene: 2 },
   rules: [{ id: 'global.joyful_smile', when: { emotion: ['joyful'] }, then: { action: 'breaks into a wide smile' } }],
 };
+
+/** Three chapters: ch-1 nothing, ch-2 «coat» for the chapter with one scene back to base, ch-3 one scene with «beard». */
+export const chapters: LookChapter[] = [
+  { chapter_id: 'ch-000001', chapter_title: 'Пролог', display_number: 1, scenes: [
+    { scene_id: 'sc-000011', display_index: 1, participants: ['yura'] },
+  ] },
+  { chapter_id: 'ch-000002', chapter_title: '', display_number: 2, looks: { yura: 'coat' }, scenes: [
+    { scene_id: 'sc-000021', display_index: 1, participants: ['yura'] },
+    { scene_id: 'sc-000022', display_index: 2, scene_title: 'Дома', participants: ['yura'], looks: { yura: 'base' } },
+    { scene_id: 'sc-000023', display_index: 3, participants: ['shop_women'] },
+  ] },
+  { chapter_id: 'ch-000003', chapter_title: 'Зима', display_number: 3, scenes: [
+    { scene_id: 'sc-000031', display_index: 1, participants: ['yura'], looks: { yura: 'beard' }, look_patch: { yura: { video_tokens: ['man', 'beard', 'scarf'] } } },
+  ] },
+];

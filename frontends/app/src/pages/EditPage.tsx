@@ -32,7 +32,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useSignal } from '@preact/signals';
 import { deleteJson, getJson, mediaUrl, patchJson, postJson, putJson } from '../api/client';
 import { HeroesPanel } from '../features/heroes/HeroesPanel';
-import { unsupportedVbook } from '../features/heroes/heroModel';
+import { assignLook } from '../features/heroes/heroApi';
+import { BASE_LOOK, findLook, orderHeroes, resolveLook, unsupportedVbook } from '../features/heroes/heroModel';
 import type { UnsupportedVbook } from '../features/heroes/heroModel';
 import type {
   AppConfig, BookChapter, BookData, BookScene, BookUnit, CharPassport, SceneTiming, WaveformData,
@@ -1050,7 +1051,7 @@ export function EditPage(props: { path?: string }) {
   // (no setState-during-render) and by the effect that syncs state on scene change.
   function buildBlocksFromScene(sc: BookScene): OverrideBlock[] {
     const blocks: OverrideBlock[] = [];
-    const passport = sc.passport ?? {};
+    const passport = sc.look_patch ?? {};
     Object.entries(passport).forEach(([charId, p]) => {
       const fields: Record<string, string> = {};
       PASSPORT_OVERRIDE_FIELDS.forEach((f) => {
@@ -1129,7 +1130,7 @@ export function EditPage(props: { path?: string }) {
       });
       desired.set(charId, m);
     });
-    const existing = sc.passport ?? {};
+    const existing = sc.look_patch ?? {};
     const allCharIds = new Set([...desired.keys(), ...Object.keys(existing)]);
     allCharIds.forEach((charId) => {
       const want = desired.get(charId);
@@ -1138,7 +1139,7 @@ export function EditPage(props: { path?: string }) {
         const newVal = want?.[f] ?? '';
         const oldVal = have ? passportFieldText(have as CharPassport, f) : '';
         if (newVal !== oldVal) {
-          result[`passport.${charId}.${f}`] = newVal;
+          result[`look_patch.${charId}.${f}`] = newVal;
         }
       });
     });
@@ -1741,6 +1742,8 @@ export function EditPage(props: { path?: string }) {
     });
     out.push(sectionLabel(t('edit_section_scene_characters')));
     out.push(inputCard(fieldLabel('participants'), readField(sc, 'participants'), false, 'participants'));
+    const sceneLooks = buildSceneLooks(sc);
+    if (sceneLooks) out.push(sceneLooks);
     out.push(buildPassportOverrideSection(sc));
     out.push(sectionLabel(t('edit_section_scene_location')));
     ['location.id', 'env.time', 'env.lighting', 'env.weather', 'env.mood', 'env.atmosphere', 'env.country', 'env.epoch'].forEach((key) => {
@@ -1808,6 +1811,55 @@ export function EditPage(props: { path?: string }) {
     return out;
   };
 
+  // «Where the look is in effect» → open that chapter / scene on the Scene tab
+  // (sceneId null — the first scene of the chapter). The position observer
+  // reloads the editor onto it, exactly like a tap in the Navigator.
+  const goToSceneFromHero = (chapterId: string, sceneId: string | null): void => {
+    const ch = chapters.find((c) => c.chapter_id === chapterId);
+    const sc = sceneId ? ch?.scenes?.find((s) => s.scene_id === sceneId) : ch?.scenes?.[0];
+    if (!ch || !sc?.scene_id) return;
+    navigateTo({ chapterId, sceneId: sc.scene_id, unitId: sc.units?.[0]?.id ?? null, unitIndex: 0 });
+    setTab(SCENE_TAB);
+  };
+
+  // Scene tab — the look of every participant that has looks: «as in the
+  // chapter» / base / a named look. An immediate action (POST /looks/assign),
+  // not part of the scene draft.
+  const buildSceneLooks = (sc: BookScene): JSX.Element | null => {
+    const ch = chapters[currentChIndex];
+    const chId = ch?.chapter_id;
+    const scId = sc.scene_id;
+    const withLooks = orderHeroes(bookData?.heroes).filter((h) => (sc.participants ?? []).includes(h.id) && h.passport && (h.looks ?? []).length > 0);
+    if (!chId || !scId || withLooks.length === 0) return null;
+    return (
+      <div class="edit-scene-looks" key="scene-looks">
+        {withLooks.map((h) => {
+          const inherited = resolveLook(h, ch, null);
+          const inheritedName = inherited && inherited.look_id !== BASE_LOOK ? (findLook(h, inherited.look_id)?.label ?? inherited.look_id) : t('look_base');
+          return (
+            <label class="edit-field" key={h.id}>
+              <span class="edit-field__label">{tf('scene_look_label', h.name || h.id)}</span>
+              <select class="select" value={sc.looks?.[h.id] ?? ''} disabled={entityBusy}
+                onChange={(e) => {
+                  const value = (e.target as HTMLSelectElement).value;
+                  setEntityBusy(true);
+                  setErrorText(null);
+                  void assignLook(bid, h.id, value === '' ? null : value, { chapters: [], scenes: [{ chapter_id: chId, scene_id: scId }] })
+                    .then(() => refreshBook())
+                    .catch((err) => setErrorText((err as Error).message))
+                    .finally(() => setEntityBusy(false));
+                }}>
+                <option value="">{tf('scene_look_inherit', inheritedName)}</option>
+                <option value={BASE_LOOK}>{t('look_base')}</option>
+                {(h.looks ?? []).map((l) => <option key={l.id} value={l.id}>{l.label || l.id}</option>)}
+              </select>
+            </label>
+          );
+        })}
+      </div>
+    );
+  };
+
   // Heroes tab — grid of hero cards + the hero sheet (features/heroes). It
   // replaces the Characters / Voices / Behavior tabs: one hero = one card.
   const buildHeroesPanel = (): JSX.Element => (
@@ -1816,6 +1868,8 @@ export function EditPage(props: { path?: string }) {
       heroes={bookData?.heroes}
       globals={bookData?.behaviour ?? null}
       issues={bookData?.hero_issues}
+      chapters={bookData?.chapters}
+      onNavigate={goToSceneFromHero}
       onChanged={refreshBook}
     />
   );

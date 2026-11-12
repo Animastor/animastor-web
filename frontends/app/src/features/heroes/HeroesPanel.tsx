@@ -17,7 +17,7 @@ import { createHero, deleteHero } from './heroApi';
 import {
   blockingIssues, findHero, heroKind, heroStats, isNarrator, orderHeroes, validateNewHeroId,
 } from './heroModel';
-import type { BehaviourGlobals, Hero, HeroIssue } from './heroModel';
+import type { BehaviourGlobals, Hero, HeroIssue, LookChapter } from './heroModel';
 
 type NewKind = 'character' | 'voice_only';
 
@@ -55,9 +55,12 @@ function HeroTile({ bookId, hero, onOpen }: { bookId: string; hero: Hero; onOpen
   );
 }
 
-export function HeroesPanel({ bookId, heroes: rawHeroes, globals, issues: rawIssues, onChanged }: {
+export function HeroesPanel({ bookId, heroes: rawHeroes, globals, issues: rawIssues, chapters, onNavigate, onChanged }: {
   bookId: string;
   heroes: unknown;
+  chapters?: LookChapter[] | null;
+  /** Open a chapter / scene in the editor (from «where the look is in effect»). */
+  onNavigate?: (chapterId: string, sceneId: string | null) => void;
   globals: BehaviourGlobals | null;
   issues: unknown;
   onChanged: () => Promise<void>;
@@ -95,6 +98,7 @@ export function HeroesPanel({ bookId, heroes: rawHeroes, globals, issues: rawIss
   if (open) {
     return (
       <HeroCard bookId={bookId} hero={open} heroes={heroes} globals={globals} issues={issues}
+        chapters={chapters ?? []} onNavigate={onNavigate ?? (() => {})}
         onChanged={onChanged} onClose={() => setOpenId(null)} />
     );
   }

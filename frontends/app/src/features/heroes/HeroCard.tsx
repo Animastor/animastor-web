@@ -27,7 +27,8 @@ import {
   BEHAVIOUR_EMOTIONS, allRuleIds, diffDraft, draftFromHero, heroKind, heroMonogram, heroWarnings, isNarrator,
   newRuleId, portraitIndex, referenceStatus, validateDraft, voiceInstruct,
 } from './heroModel';
-import type { BehaviourGlobals, Hero, HeroDraft, HeroIssue, HeroRule, ReferenceStatus } from './heroModel';
+import type { BehaviourGlobals, Hero, HeroDraft, HeroIssue, HeroRule, LookChapter, ReferenceStatus } from './heroModel';
+import { HeroLooks } from './HeroLooks';
 
 const KIND_KEYS: Record<ReturnType<typeof heroKind>, StrKey> = {
   narrator: 'hero_kind_narrator',
@@ -104,10 +105,13 @@ function Section({ title, badge, action, children }: {
   );
 }
 
-export function HeroCard({ bookId, hero, heroes, globals, issues, onChanged, onClose }: {
+export function HeroCard({ bookId, hero, heroes, globals, issues, chapters, onNavigate, onChanged, onClose }: {
   bookId: string;
   hero: Hero;
   heroes: Hero[];
+  /** Chapters of the book — where looks are assigned. */
+  chapters: LookChapter[];
+  onNavigate: (chapterId: string, sceneId: string | null) => void;
   globals: BehaviourGlobals | null;
   issues: HeroIssue[];
   /** Re-read GET /book; resolves when fresh data has been applied. */
@@ -249,6 +253,12 @@ export function HeroCard({ bookId, hero, heroes, globals, issues, onChanged, onC
                 <Field key="c" label={t('field_clothes')} value={draft.clothes} multiline rows={2} onInput={(v) => set('clothes', v)} />,
                 <Field key="t" label={t('field_video_tokens')} hint={t('hero_field_tokens_hint')} value={draft.videoTokens} onInput={(v) => set('videoTokens', v)} />,
               ] : <p class="hero-empty">{t('hero_passport_empty')}</p>}
+            </Section>
+          )}
+
+          {!isNarrator(hero) && hero.passport && (
+            <Section title={t('hero_section_looks')}>
+              <HeroLooks bookId={bookId} hero={hero} chapters={chapters} busy={busy} act={act} onNavigate={onNavigate} />
             </Section>
           )}
 

@@ -80,6 +80,24 @@ export interface HeroImageRef {
   [key: string]: unknown;
 }
 
+/** Fields a look replaces — each one REPLACES the base passport field as a whole. */
+export interface LookFields {
+  appearance?: string;
+  clothes?: string;
+  video_tokens?: string[];
+}
+
+/** Named look of a hero — a passport override (VBOOK_FORMAT_V4.md §4a). */
+export interface HeroLook {
+  id: string;
+  label: string;
+  fields: LookFields;
+  image_ref?: HeroImageRef | null;
+  notes?: string;
+  evidence?: { quote?: string; basis?: string; status?: string; [key: string]: unknown } | null;
+  [key: string]: unknown;
+}
+
 export interface Hero {
   schema?: string;
   id: string;
@@ -87,6 +105,7 @@ export interface Hero {
   role?: string | null;
   aliases?: string[] | null;
   passport?: HeroPassport | null;
+  looks?: HeroLook[] | null;
   voice?: HeroVoice | null;
   behaviour?: HeroBehaviour | null;
   image_refs?: HeroImageRef[] | null;
@@ -469,4 +488,257 @@ export function unsupportedVbook(err: unknown): UnsupportedVbook | null {
     version: typeof version === 'string' || typeof version === 'number' ? String(version) : '?',
     supported: typeof body.supported === 'number' ? body.supported : 4,
   };
+}
+
+// ── Looks (passport overrides, VBOOK_FORMAT_V4.md §4a) ────────────────────
+
+export const BASE_LOOK = 'base';
+export const LOOK_FIELDS = ['appearance', 'clothes', 'video_tokens'] as const;
+export type LookField = typeof LOOK_FIELDS[number];
+
+/** The parts of a chapter / scene the resolver reads. */
+export interface LookChapter {
+  chapter_id?: string | null;
+  chapter_title?: string | null;
+  display_number?: number | null;
+  looks?: Record<string, string> | null;
+  scenes?: LookScene[] | null;
+}
+export interface LookScene {
+  scene_id?: string | null;
+  scene_title?: string | null;
+  display_index?: number | null;
+  participants?: string[] | null;
+  looks?: Record<string, string> | null;
+  look_patch?: Record<string, LookPatch | null> | null;
+}
+/** One-off scene patch as it arrives from the API (nulls tolerated). */
+export interface LookPatch {
+  appearance?: string | null;
+  clothes?: string | null;
+  video_tokens?: string[] | string | null;
+}
+
+export interface LookValues {
+  appearance: string;
+  clothes: string;
+  video_tokens: string[];
+}
+
+export interface ResolvedLook extends LookValues {
+  hero_id: string;
+  /** Look id, or "base". */
+  look_id: string;
+  /** Where the look was taken from. */
+  source: 'scene' | 'chapter' | 'base';
+  base: LookValues;
+  /** Fields that differ from the base passport. */
+  changed: LookField[];
+  /** Fields that came from the scene's one-off patch. */
+  patched: LookField[];
+  image_ref: HeroImageRef | null;
+  warnings: string[];
+}
+
+function baseValues(hero: Hero): LookValues {
+  const p = hero.passport ?? {};
+  const tokens = p.video_tokens;
+  return {
+    appearance: typeof p.appearance === 'string' ? p.appearance : '',
+    clothes: typeof p.clothes === 'string' ? p.clothes : '',
+    video_tokens: Array.isArray(tokens) ? tokens.filter((x): x is string => typeof x === 'string') : [],
+  };
+}
+
+function applyFields(target: LookValues, fields: LookPatch | null | undefined): LookField[] {
+  const applied: LookField[] = [];
+  if (!fields) return applied;
+  if (typeof fields.appearance === 'string' && fields.appearance !== '') { target.appearance = fields.appearance; applied.push('appearance'); }
+  if (typeof fields.clothes === 'string' && fields.clothes !== '') { target.clothes = fields.clothes; applied.push('clothes'); }
+  if (Array.isArray(fields.video_tokens) && fields.video_tokens.length > 0) { target.video_tokens = [...fields.video_tokens]; applied.push('video_tokens'); }
+  return applied;
+}
+
+function changedFields(a: LookValues, b: LookValues): LookField[] {
+  return LOOK_FIELDS.filter((f) => (f === 'video_tokens' ? !sameList(a.video_tokens, b.video_tokens) : a[f] !== b[f]));
+}
+
+export function findLook(hero: Hero, lookId: string | null | undefined): HeroLook | null {
+  if (!lookId || lookId === BASE_LOOK) return null;
+  return (hero.looks ?? []).find((l) => l?.id === lookId) ?? null;
+}
+
+/**
+ * The final look of a hero in a scene — client copy of vbook-runtime
+ * resolveHeroLook (same cases, same fixtures):
+ *   scene.looks[id] → chapter.looks[id] → base; then the look's fields over
+ *   the passport; then scene.look_patch[id] over the result.
+ * An unknown look id is skipped with a warning. null — no passport, no look.
+ */
+export function resolveLook(hero: Hero, chapter?: LookChapter | null, scene?: LookScene | null): ResolvedLook | null {
+  if (!hero.passport) return null;
+  const base = baseValues(hero);
+  const warnings: string[] = [];
+  let lookId = BASE_LOOK;
+  let source: ResolvedLook['source'] = 'base';
+  let look: HeroLook | null = null;
+  const candidates: [ResolvedLook['source'], string | undefined][] = [
+    ['scene', scene?.looks?.[hero.id]],
+    ['chapter', chapter?.looks?.[hero.id]],
+  ];
+  for (const [from, id] of candidates) {
+    if (!id) continue;
+    if (id === BASE_LOOK) { source = from; break; }
+    const found = findLook(hero, id);
+    if (found) { look = found; lookId = id; source = from; break; }
+    warnings.push(`unknown_look:${id}`);
+  }
+  const values: LookValues = { ...base, video_tokens: [...base.video_tokens] };
+  applyFields(values, look?.fields);
+  const patched = applyFields(values, scene?.look_patch?.[hero.id]);
+  return {
+    hero_id: hero.id, look_id: lookId, source, ...values, base,
+    changed: changedFields(values, base), patched,
+    image_ref: look?.image_ref ?? null, warnings,
+  };
+}
+
+/** A look as the card shows it: its fields over the base passport, no scene context. */
+export function previewLook(hero: Hero, lookId: string): ResolvedLook | null {
+  return resolveLook(hero, null, lookId === BASE_LOOK ? null : { looks: { [hero.id]: lookId } });
+}
+
+export interface LookPlace {
+  chapterId: string;
+  /** null — the whole chapter. */
+  sceneId: string | null;
+  chapterNumber: number | null;
+  chapterTitle: string;
+  sceneNumber: number | null;
+  sceneTitle: string;
+}
+
+/**
+ * Where each look of a hero is assigned: look id → chapters and scenes that
+ * REFERENCE it (a scene inside an assigned chapter is not repeated). The key
+ * "base" lists scenes that force the base passport against their chapter.
+ */
+export function lookUsage(chapters: readonly LookChapter[] | null | undefined, heroId: string): Record<string, LookPlace[]> {
+  const out: Record<string, LookPlace[]> = {};
+  const add = (id: string, place: LookPlace) => { (out[id] ??= []).push(place); };
+  (chapters ?? []).forEach((ch, ci) => {
+    const chapterId = ch?.chapter_id;
+    if (!chapterId) return;
+    const head = { chapterId, chapterNumber: ch.display_number ?? ci + 1, chapterTitle: ch.chapter_title ?? '' };
+    const own = ch.looks?.[heroId];
+    if (own) add(own, { ...head, sceneId: null, sceneNumber: null, sceneTitle: '' });
+    (ch.scenes ?? []).forEach((sc, si) => {
+      const id = sc?.looks?.[heroId];
+      if (!id || !sc.scene_id) return;
+      add(id, { ...head, sceneId: sc.scene_id, sceneNumber: sc.display_index ?? si + 1, sceneTitle: sc.scene_title ?? '' });
+    });
+  });
+  return out;
+}
+
+export type LookIdError = 'look_id_invalid' | 'look_id_reserved' | 'look_id_taken';
+
+/** Id typed for a new look; empty is fine — the server derives it from the label. */
+export function validateNewLookId(id: string, hero: Hero): LookIdError | null {
+  const value = id.trim();
+  if (value === '') return null;
+  if (!HERO_ID_RE.test(value) || value.length > HERO_ID_MAX) return 'look_id_invalid';
+  if (value === BASE_LOOK) return 'look_id_reserved';
+  if ((hero.looks ?? []).some((l) => l?.id === value)) return 'look_id_taken';
+  return null;
+}
+
+/** Editable copy of a look: an empty field means "as in the base passport". */
+export interface LookDraft {
+  label: string;
+  notes: string;
+  appearance: string;
+  clothes: string;
+  videoTokens: string;
+}
+
+export function draftFromLook(look: HeroLook | null): LookDraft {
+  return {
+    label: look?.label ?? '',
+    notes: look?.notes ?? '',
+    appearance: look?.fields?.appearance ?? '',
+    clothes: look?.fields?.clothes ?? '',
+    videoTokens: tokensToText(look?.fields?.video_tokens),
+  };
+}
+
+/** Draft → `fields` of a look (only what the look really overrides). */
+export function lookFieldsFromDraft(draft: LookDraft): LookFields {
+  const fields: LookFields = {};
+  if (draft.appearance.trim() !== '') fields.appearance = draft.appearance.trim();
+  if (draft.clothes.trim() !== '') fields.clothes = draft.clothes.trim();
+  const tokens = textToTokens(draft.videoTokens);
+  if (tokens.length > 0) fields.video_tokens = tokens;
+  return fields;
+}
+
+export type LookDraftError = 'look_err_label_required' | 'look_err_empty' | 'hero_err_tokens_max';
+
+export function validateLookDraft(draft: LookDraft): LookDraftError[] {
+  const errors: LookDraftError[] = [];
+  if (draft.label.trim() === '') errors.push('look_err_label_required');
+  const fields = lookFieldsFromDraft(draft);
+  if (Object.keys(fields).length === 0) errors.push('look_err_empty');
+  if ((fields.video_tokens?.length ?? 0) > VIDEO_TOKENS_MAX) errors.push('hero_err_tokens_max');
+  return errors;
+}
+
+/** Draft → PATCH /looks/:id `fields`: only changes; null removes a field from the look. */
+export function diffLook(look: HeroLook, draft: LookDraft): Record<string, unknown> {
+  const orig = draftFromLook(look);
+  const out: Record<string, unknown> = {};
+  if (draft.label.trim() !== orig.label) out.label = draft.label.trim();
+  if (draft.notes !== orig.notes) out.notes = draft.notes;
+  if (draft.appearance.trim() !== orig.appearance) out['fields.appearance'] = draft.appearance.trim() || null;
+  if (draft.clothes.trim() !== orig.clothes) out['fields.clothes'] = draft.clothes.trim() || null;
+  if (draft.videoTokens !== orig.videoTokens) {
+    const tokens = textToTokens(draft.videoTokens);
+    if (!sameList(tokens, look.fields?.video_tokens ?? [])) out['fields.video_tokens'] = tokens.length > 0 ? tokens : null;
+  }
+  return out;
+}
+
+export interface LookAssignment {
+  chapters: string[];
+  scenes: { chapter_id: string; scene_id: string }[];
+}
+
+const placeKey = (chapterId: string, sceneId: string | null): string => `${chapterId}/${sceneId ?? ''}`;
+
+/**
+ * The assign dialog: places checked now vs. places that reference the look →
+ * what to assign and what to release (two calls of POST /looks/assign).
+ */
+export function diffAssignment(current: readonly LookPlace[], checked: ReadonlySet<string>): { assign: LookAssignment; release: LookAssignment } {
+  const had = new Set(current.map((p) => placeKey(p.chapterId, p.sceneId)));
+  const split = (keys: string[]): LookAssignment => {
+    const out: LookAssignment = { chapters: [], scenes: [] };
+    for (const key of keys) {
+      const at = key.indexOf('/');
+      const chapterId = key.slice(0, at);
+      const sceneId = key.slice(at + 1);
+      if (sceneId) out.scenes.push({ chapter_id: chapterId, scene_id: sceneId }); else out.chapters.push(chapterId);
+    }
+    return out;
+  };
+  return {
+    assign: split([...checked].filter((k) => !had.has(k))),
+    release: split([...had].filter((k) => !checked.has(k))),
+  };
+}
+
+export { placeKey as lookPlaceKey };
+
+export function isEmptyAssignment(a: LookAssignment): boolean {
+  return a.chapters.length === 0 && a.scenes.length === 0;
 }

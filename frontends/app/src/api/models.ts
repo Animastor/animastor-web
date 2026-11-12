@@ -348,6 +348,8 @@ export interface BookData {
 
 export interface BookChapter {
   chapter_id?: string | null;
+  /** Look assigned to a hero for the whole chapter (scene.looks wins). */
+  looks?: Record<string, string> | null;
   chapter_title?: string | null;
   type?: string | null;
   is_special?: boolean;
@@ -364,8 +366,10 @@ export interface BookScene {
   location?: SceneLocation | null;
   audio?: SceneAudio | null;
   participants?: string[] | null;
-  /** Per-scene character passport overrides (scene.passport map). */
-  passport?: Record<string, CharPassport> | null;
+  /** Look assigned to a hero in this scene: look id or "base" (VBOOK_FORMAT_V4.md §4a). */
+  looks?: Record<string, string> | null;
+  /** One-off field replacement on top of the resolved look, this scene only. */
+  look_patch?: Record<string, CharPassport> | null;
   units?: BookUnit[] | null;
 }
 

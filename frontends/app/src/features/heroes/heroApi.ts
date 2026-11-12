@@ -8,7 +8,7 @@
 // Generation endpoints (designVoiceCandidates) carry `client_action` exactly
 // like /regenerate: they may be called from a click handler only.
 import { deleteJson, getJson, mediaUrl, patchJson, postForm, postJson } from '../../api/client';
-import type { HeroRule, VoiceReference } from './heroModel';
+import type { HeroRule, LookAssignment, LookFields, VoiceReference } from './heroModel';
 
 const book = (bookId: string): string => `/book/${encodeURIComponent(bookId)}`;
 const hero = (bookId: string, heroId: string): string => `${book(bookId)}/heroes/${encodeURIComponent(heroId)}`;
@@ -46,6 +46,31 @@ export function patchRule(bookId: string, heroId: string, ruleId: string, fields
 
 export function deleteRule(bookId: string, heroId: string, ruleId: string): Promise<unknown> {
   return deleteJson(`${hero(bookId, heroId)}/rules/${encodeURIComponent(ruleId)}`);
+}
+
+// ── Looks (passport overrides) ───────────────────────────────────────────
+
+export function createLook(bookId: string, heroId: string, body: { id?: string; label: string; fields: LookFields; notes?: string }): Promise<{ look_id: string }> {
+  return postJson(`${hero(bookId, heroId)}/looks`, body);
+}
+
+export function patchLook(bookId: string, heroId: string, lookId: string, fields: Record<string, unknown>): Promise<unknown> {
+  return patchJson(`${hero(bookId, heroId)}/looks/${encodeURIComponent(lookId)}`, { fields });
+}
+
+/** Deleting a look releases every chapter / scene that referenced it. */
+export function deleteLook(bookId: string, heroId: string, lookId: string): Promise<unknown> {
+  return deleteJson(`${hero(bookId, heroId)}/looks/${encodeURIComponent(lookId)}`);
+}
+
+/** lookId: a look id, "base" (scenes only — base passport against the chapter) or null (release). */
+export function assignLook(bookId: string, heroId: string, lookId: string | null, places: LookAssignment): Promise<unknown> {
+  return postJson(`${book(bookId)}/looks/assign`, { hero_id: heroId, look_id: lookId, chapters: places.chapters, scenes: places.scenes });
+}
+
+/** Reference image of a look (the slot exists; generation is a future task). */
+export function lookImageUrl(bookId: string, heroId: string, lookId: string, sha?: string): string {
+  return mediaUrl(`${hero(bookId, heroId)}/looks/${encodeURIComponent(lookId)}/image${sha ? `?v=${sha.slice(0, 12)}` : ''}`);
 }
 
 // ── Voice reference (endpoints owned by the reference-voices task) ────────
