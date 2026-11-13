@@ -335,7 +335,10 @@ export interface BookData {
   chapters?: BookChapter[] | null;
   characters?: BookCharacter[] | null;
   voices?: Record<string, BookVoiceEntry> | null;
+  /** Flat character map (API projection of behavior.json v2); read via behaviorCharacterEntries(). */
   behaviors?: Record<string, BookBehaviorEntry> | null;
+  /** Read-only behaviour rules (behavior.json v2 `rules`); no UI in phase 0. */
+  behavior_rules?: BookBehaviorRule[] | null;
   locations?: Record<string, BookLocation> | null;
   /** Server-computed flat scene list (thin-client contract) — preferred over traversal. */
   scene_list?: { chapter_id?: string | null; scene_id?: string | null; type?: string | null }[] | null;
@@ -393,9 +396,11 @@ export interface BookVoiceEntry {
   } | null;
 }
 
-// Per-character behavior (behavior.json) — keyed by character_id, same
-// pattern as voices. Schema v2.1 — the Character Behavior contract (the stored
-// object is schema-tolerant: unknown future keys are preserved server-side):
+// Per-character behavior — keyed by character_id, same pattern as voices.
+// Server stores behavior.json schema v2 ({schema_version, rules, characters});
+// the API keeps this flat v2.1-shaped map under `behaviors` and adds the
+// read-only `behavior_rules` (see api/behaviors.ts). Character entry — the
+// Character Behavior contract (schema-tolerant: unknown keys preserved):
 //   baseline    — how the character behaves normally
 //   quirks      — recurring habits, one entry each
 //   reactions   — trigger → reaction patterns
@@ -403,6 +408,21 @@ export interface BookVoiceEntry {
 export interface BehaviorReaction {
   trigger?: string | null;
   reaction?: string | null;
+}
+
+/** Behaviour rule (read-only in phase 0; animastor-docs VBOOK_BEHAVIOUR.md). */
+export interface BookBehaviorRule {
+  id: string;
+  scope?: 'global' | 'character' | string;
+  character_id?: string | null;
+  when?: { emotion?: string[]; unit_type?: string[] } | null;
+  then?: { action?: string } | null;
+  strength?: number;
+  probability?: number;
+  cooldown_iu?: number;
+  priority?: number;
+  enabled?: boolean;
+  [key: string]: unknown;
 }
 
 export interface BookBehaviorEntry {
