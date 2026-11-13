@@ -48,6 +48,7 @@
 import { signal } from '@preact/signals';
 import type { Signal } from '@preact/signals';
 import { getJson, postJson, postMultipart } from '../api/client';
+import { t } from '../app/i18n';
 import type {
   AssetsStateResponse, BookData, BookStatus, ImportResponse, RecentBooksResponse,
 } from '../api/models';
@@ -211,7 +212,9 @@ export async function importBookFromFile(file: File): Promise<void> {
     }
   } catch (e) {
     session.phase.value = 'IDLE';
-    errorMessage.value = (e as Error).message || 'Import failed';
+    errorMessage.value = (e as { status?: number } | null)?.status === 401
+      ? t('auth_login_required_import')
+      : (e as Error).message || 'Import failed';
   }
 }
 
