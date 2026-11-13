@@ -16,6 +16,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../api/client', () => ({
+  POLL_REQUEST_TIMEOUT_MS: 10_000,
   API_BASE: 'http://test',
   getJson: vi.fn(async () => ({
     audio_enabled: true,

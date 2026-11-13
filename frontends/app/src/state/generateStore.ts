@@ -22,7 +22,9 @@
 // (identity/file flows) and startGeneration via the controlled
 // setGenerationBuildId adapter — no fork, one signal.
 import { signal } from '@preact/signals';
-import { getJson, postJson, postJsonLong, putJson, sse } from '../api/client';
+import { getJson, postJson, postJsonLong, putJson, sse, POLL_REQUEST_TIMEOUT_MS } from '../api/client';
+import type { SseEvent } from '../api/client';
+import { requestPanelRefresh, sseEventRequestsPanelRefresh } from './panelRefresh';
 import type {
   BookData, DiffSummary,
   ProgressPanelResponse, RegenerateResponse, WorkerCounts,
@@ -547,10 +549,22 @@ function createSseStreamState(): SseStreamState {
 }
 const sseStream = createSseStreamState();
 
+// О1 (reports/2026-11-07/orch-v2-image-scene-run.md): the routing of the
+// payload stays in @animastor/web-generator (routeProgressEvent); this host
+// tap only notices `generation_complete` / v2 `progress` (with command_id)
+// and asks the Generator's progress-panel loop to re-poll NOW
+// (state/panelRefresh.ts). The panel poll stays authoritative.
+async function* tapPanelRefresh(events: AsyncGenerator<SseEvent>): AsyncGenerator<SseEvent> {
+  for await (const ev of events) {
+    if (ev.data && sseEventRequestsPanelRefresh(ev.data)) requestPanelRefresh('sse');
+    yield ev;
+  }
+}
+
 const sseStreamPort: SseStreamPort = {
   start(bId: string) {
     if (!sseStream.controller) sseStream.controller = new AbortController();
-    return sse(`/book/${encodeURIComponent(bId)}/progress-stream`, sseStream.controller.signal);
+    return tapPanelRefresh(sse(`/book/${encodeURIComponent(bId)}/progress-stream`, sseStream.controller.signal));
   },
   stop() {
     sseStream.controller?.abort();
@@ -863,8 +877,9 @@ export async function checkAndRestoreGenerationState(): Promise<void> {
   if (isRegenerating.value) return;
   try {
     const [panel, counts] = await Promise.all([
-      getJson<ProgressPanelResponse>(`/book/${encodeURIComponent(currentBookId)}/progress-panel`),
-      getJson<WorkerCounts>('/worker/counts', { cache: 'no-store' }),
+      // no-store by default (api/client.ts isNoStorePath) — О1
+      getJson<ProgressPanelResponse>(`/book/${encodeURIComponent(currentBookId)}/progress-panel`, { timeoutMs: POLL_REQUEST_TIMEOUT_MS }),
+      getJson<WorkerCounts>('/worker/counts', { timeoutMs: POLL_REQUEST_TIMEOUT_MS }),
     ]);
     const hasActiveGpuTasks = panel.any_incomplete;
     const hasActiveWorkers = hasActiveGpuTasks || (counts.active_vbook ?? 0) > 0;

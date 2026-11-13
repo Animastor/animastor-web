@@ -28,6 +28,7 @@ const BOOK = 'ba_1788172242081';
 let panelTasks: unknown[] = [];
 
 vi.mock('../api/client', () => ({
+  POLL_REQUEST_TIMEOUT_MS: 10_000,
   API_BASE: 'http://test',
   getJson: vi.fn(async (url: string) => {
     if (url.startsWith('/worker/counts')) {

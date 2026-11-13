@@ -18,6 +18,8 @@ const ANON = { authenticated: false, identity: 'none', user: null, workspace: nu
 
 // Mock the API client so authStore / generateStore never hit the network.
 vi.mock('../../api/client', () => ({
+  POLL_REQUEST_TIMEOUT_MS: 10_000,
+  setLoginRequiredHandler: vi.fn(),
   getJson: vi.fn(),
   postJson: vi.fn(),
   postJsonLong: vi.fn(),

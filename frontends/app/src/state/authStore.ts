@@ -2,7 +2,7 @@
 // Server-side session cookie is the source of truth; localStorage is never
 // used for auth. The store only mirrors /auth/me.
 import { signal } from '@preact/signals';
-import { getJson, postJson } from '../api/client';
+import { getJson, postJson, setLoginRequiredHandler } from '../api/client';
 import { stashBookSessionForUser, restoreStashedBookSessionForUser } from './generateStore';
 
 export interface AuthUser { id: string; username: string; display_name?: string | null; role?: string; }
@@ -12,6 +12,23 @@ export interface AuthMe { authenticated: boolean; identity?: string; user: AuthU
 export const authMe = signal<AuthMe>({ authenticated: false, user: null, workspace: null });
 export const authLoading = signal(false);
 export const authError = signal<string | null>(null);
+
+// Sign-in prompt: bumped when the server answers 401 to a caller that is not
+// signed in (import, export, book data). The user menu opens the login dialog
+// once per bump (loginPromptHandled guards against several mounted menus).
+export const loginPrompt = signal(0);
+let loginPromptHandled = 0;
+export function requestLogin(): void {
+  if (authMe.value.user) return; // signed in — a 401 is not about the session prompt
+  loginPrompt.value = loginPrompt.value + 1;
+}
+/** Claims the current prompt; true for exactly one caller per bump. */
+export function claimLoginPrompt(): boolean {
+  if (loginPrompt.value <= loginPromptHandled) return false;
+  loginPromptHandled = loginPrompt.value;
+  return true;
+}
+setLoginRequiredHandler(() => requestLogin());
 
 export async function fetchMe(): Promise<AuthMe> {
   try {

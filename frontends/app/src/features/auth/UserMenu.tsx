@@ -6,7 +6,7 @@
 import type { JSX } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { t } from '../../app/i18n';
-import { authMe, authLoading, authError, fetchMe, login, register, logout } from '../../state/authStore';
+import { authMe, authLoading, authError, fetchMe, login, register, logout, loginPrompt, claimLoginPrompt } from '../../state/authStore';
 
 // Simple person SVG (concept §19: user-circle, NOT a group icon).
 function IconUser(props: JSX.SVGAttributes<SVGSVGElement>) {
@@ -107,6 +107,11 @@ export function UserMenu() {
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => { void fetchMe(); }, []);
+  // A sign-in-only action (import, export, book data) was refused: open login.
+  const prompt = loginPrompt.value;
+  useEffect(() => {
+    if (prompt > 0 && claimLoginPrompt()) { setOpen(false); setDialogMode('login'); }
+  }, [prompt]);
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
