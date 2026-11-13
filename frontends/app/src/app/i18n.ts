@@ -205,6 +205,7 @@ const dict = {
     share_community_empty: 'Сейчас нет доступных публичных воркеров.',
     share_community_hint: 'Публичные воркеры участников сообщества появятся здесь.',
     share_login_required: 'Войдите в аккаунт, чтобы видеть личные доступы.',
+    auth_login_required_import: 'Импорт и скачивание книг доступны после входа в аккаунт.',
     // Owner sharing controls
     share_btn: 'Sharing',
     share_modal_title: 'Sharing воркера',
@@ -1067,6 +1068,7 @@ const dict = {
     share_community_empty: 'No public Workers are currently available.',
     share_community_hint: 'Public workers contributed by the community appear here.',
     share_login_required: 'Sign in to see personal access grants.',
+    auth_login_required_import: 'Sign in to import or download books.',
     // Owner sharing controls
     share_btn: 'Sharing',
     share_modal_title: 'Worker sharing',

@@ -12,6 +12,23 @@ const REQUEST_TIMEOUT_MS = 30_000; // OkHttp default read timeout
 const LONG_REQUEST_TIMEOUT_MS = 15 * 60_000;
 const BLOB_TIMEOUT_MS = 120_000;   // large media downloads
 
+// Sign-in required: the server answers 401 on book data, import and export
+// for callers that are not signed in. One app-wide hook (set by authStore)
+// turns that into a login prompt instead of a bare error.
+let loginRequiredHandler: ((path: string) => void) | null = null;
+export function setLoginRequiredHandler(fn: ((path: string) => void) | null): void {
+  loginRequiredHandler = fn;
+}
+/** Pure — exported for tests. */
+export function isLoginRequired(path: string, status: number): boolean {
+  return status === 401 && !path.startsWith('/auth/');
+}
+function notifyLoginRequired(path: string, status: number): void {
+  if (isLoginRequired(path, status) && loginRequiredHandler) {
+    try { loginRequiredHandler(path); } catch { /* UI hook must never break a request */ }
+  }
+}
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -61,7 +78,8 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs: numbe
       let msg = res.statusText;
       let body: unknown;
       try { body = await res.json(); msg = (body as any)?.error || (body as any)?.message || msg; } catch { /* ignore */ }
-      throw new ApiError(msg, res.status, undefined, body);
+      notifyLoginRequired(path, res.status);
+      throw new ApiError(msg, res.status, (body as any)?.code, body);
     }
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
@@ -153,7 +171,10 @@ export async function getBlob(path: string, signal?: AbortSignal, onProgress?: (
   const { signal: s, timedOut, clear } = withTimeout(signal, BLOB_TIMEOUT_MS);
   try {
     const res = await fetch(API_BASE + path, { headers: { 'Accept': 'application/octet-stream' }, signal: s });
-    if (!res.ok) throw new ApiError(res.statusText, res.status);
+    if (!res.ok) {
+      notifyLoginRequired(path, res.status);
+      throw new ApiError(res.statusText, res.status);
+    }
     if (!res.body) return res.blob();
     const reader = res.body.getReader();
     const chunks: BlobPart[] = [];
@@ -235,6 +256,7 @@ export async function postChatStream(path: string, body: unknown, handlers: Chat
       msg = (j as any)?.error || (j as any)?.message || msg;
       code = (j as any)?.code;
     } catch { /* ignore */ }
+    notifyLoginRequired(path, res.status);
     throw new ApiError(msg, res.status, code);
   }
   const reader = res.body.getReader();
@@ -283,7 +305,10 @@ export async function* sse(path: string, signal?: AbortSignal): AsyncGenerator<S
     cache: 'no-store',
     signal
   });
-  if (!res.ok || !res.body) throw new ApiError(res.statusText, res.status);
+  if (!res.ok || !res.body) {
+    notifyLoginRequired(path, res.status);
+    throw new ApiError(res.statusText, res.status);
+  }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
