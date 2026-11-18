@@ -18,13 +18,14 @@ import type { StrKey } from '../../app/i18n';
 import { IconAdd, IconCheck, IconChevronLeft, IconClose, IconImage, IconSave, IconSparkle, IconVolumeUp } from '../../app/icons';
 import { Modal, Switch } from '../../lib/ui';
 import {
-  clearVoiceReference, createRule, deleteHero, deleteImageRef, deleteRule, designVoiceCandidates, imageRefUrl,
+  clearVoiceReference, createRule, deleteHero, deleteImageRef, deleteRule, deleteVoiceCandidate, designVoiceCandidates, imageRefUrl,
   listVoiceCandidates, patchHero, patchImageRef, patchRule, pinVoiceReference, refFileName, uploadImageRef,
   uploadVoiceCandidate, userClick, voiceFileUrl,
 } from './heroApi';
 import type { VoiceCandidate } from './heroApi';
 import {
-  BEHAVIOUR_EMOTIONS, allRuleIds, diffDraft, draftFromHero, heroKind, heroMonogram, heroWarnings, isNarrator,
+  BEHAVIOUR_EMOTIONS, allRuleIds, canDeleteCandidate, canPinCandidate, candidateLine, diffDraft, dirtySummary, draftFromHero,
+  duplicateWarnings, findHero, heroKind, heroMonogram, heroWarnings, isNarrator,
   newRuleId, portraitIndex, referenceStatus, validateDraft, voiceInstruct,
 } from './heroModel';
 import type { BehaviourGlobals, Hero, HeroDraft, HeroIssue, HeroRule, LookChapter, ReferenceStatus } from './heroModel';
@@ -44,18 +45,34 @@ export const REF_STATUS_KEYS: Record<ReferenceStatus, StrKey> = {
   mismatch: 'hero_ref_mismatch',
 };
 
+/** The candidate list is re-read this often while a command runs (HERO_CARD.md §6). */
+export const CANDIDATES_POLL_MS = 3000;
+
 /** Endpoints that are not deployed yet answer 404/405/501 — the block degrades, the card keeps working. */
 function isUnavailable(e: unknown): boolean {
   return e instanceof ApiError && (e.status === 404 || e.status === 405 || e.status === 501);
 }
 
-function errorText(e: unknown): string {
+/**
+ * The text of a failed action. VBook 4 errors are `{error: <code>, message}`:
+ * the message is shown (ApiError.message), the code only picks a clearer text
+ * where the card knows one (HERO_CARD.md §7, §10 п.5).
+ */
+export function errorText(e: unknown): string {
   if (e instanceof ApiError) {
     const code = (e.body as { error?: string } | undefined)?.error;
     if (e.status === 409 && code === 'rev_conflict') return t('hero_rev_conflict');
+    if (e.status === 400 && code === 'invalid_character' && /look/i.test(e.message)) return t('hero_err_passport_has_looks');
     return e.message || `${e.status}`;
   }
   return (e as Error)?.message || 'unknown';
+}
+
+/** «N scenes will be redrawn (image, video)» after a mutation — or null. */
+export function dirtyNotice(result: unknown): string | null {
+  const sum = dirtySummary((result as { dirty_scenes?: unknown } | null)?.dirty_scenes);
+  if (sum.scenes === 0) return null;
+  return tf('hero_dirty_scenes', sum.scenes, sum.layers.join(', ') || '—');
 }
 
 export function Portrait({ bookId, hero, size }: { bookId: string; hero: Hero; size: 'grid' | 'card' }): JSX.Element {
@@ -124,6 +141,7 @@ export function HeroCard({ bookId, hero, heroes, globals, issues, chapters, onNa
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [showInstruct, setShowInstruct] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const fields = useMemo(() => diffDraft(hero, draft), [hero, draft]);
   const dirty = Object.keys(fields).length > 0;
@@ -150,8 +168,9 @@ export function HeroCard({ bookId, hero, heroes, globals, issues, chapters, onNa
   const act = useCallback(async (fn: () => Promise<unknown>): Promise<boolean> => {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
-      await fn();
+      setNotice(dirtyNotice(await fn()));
       await onChanged();
       return true;
     } catch (e) {
@@ -166,8 +185,9 @@ export function HeroCard({ bookId, hero, heroes, globals, issues, chapters, onNa
     if (!dirty || draftErrors.length > 0) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
-      await patchHero(bookId, hero.id, fields, hero.rev);
+      setNotice(dirtyNotice(await patchHero(bookId, hero.id, fields, hero.rev)));
       // The draft equals what was sent — let the fresh hero replace it.
       dirtyRef.current = false;
       await onChanged();
@@ -200,6 +220,7 @@ export function HeroCard({ bookId, hero, heroes, globals, issues, chapters, onNa
 
   const kind = heroKind(hero);
   const warnings = heroWarnings(issues, hero.id);
+  const duplicates = duplicateWarnings(issues, hero.id);
   const title = draft.name.trim() || (isNarrator(hero) ? t('hero_kind_narrator') : hero.id);
 
   return (
@@ -217,6 +238,16 @@ export function HeroCard({ bookId, hero, heroes, globals, issues, chapters, onNa
       {error && <div class="hero-sheet__error" role="alert">{error}</div>}
       {draftErrors.map((code) => <div class="hero-sheet__error" key={code}>{tf(code, 4, 64)}</div>)}
       {warnings.map((w, i) => <div class="hero-sheet__warn" key={`${w.code}:${i}`}>{w.message || w.code}</div>)}
+      {duplicates.map((d) => {
+        const other = findHero(heroes, d.of);
+        return (
+          <div class="hero-sheet__warn hero-sheet__warn--duplicate" key={`dup:${d.of}`} data-testid="hero-duplicate">
+            {tf('hero_possible_duplicate', (other?.name ?? '').trim() || d.of)}
+            {d.evidence.length > 0 && <span class="hero-sheet__evidence"> {d.evidence.map((q) => `«${q}»`).join(' · ')}</span>}
+          </div>
+        );
+      })}
+      {notice && <div class="hero-sheet__notice" role="status">{notice}</div>}
 
       <div class="hero-sheet__layout">
         {/* ── Left column: who this is ── */}
@@ -333,17 +364,22 @@ function VoiceReferenceBlock({ bookId, hero, busy, act, setError, timbreDirty }:
 }): JSX.Element {
   const [candidates, setCandidates] = useState<VoiceCandidate[] | null>(null);
   const [pending, setPending] = useState(false);
+  const [outdated, setOutdated] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const [uploadText, setUploadText] = useState('');
+  const [refTexts, setRefTexts] = useState<Record<string, string>>({});
   const fileInput = useRef<HTMLInputElement | null>(null);
   const status = referenceStatus(hero.voice);
   const ref = hero.voice?.reference ?? null;
+  const pinned = status === 'pinned';
 
+  // Opening the card only READS the list (HERO_CARD.md §6) — never a command.
   const load = useCallback(async () => {
     try {
       const res = await listVoiceCandidates(bookId, hero.id);
       setCandidates(Array.isArray(res?.candidates) ? res.candidates : []);
       setPending(res?.pending === true);
+      setOutdated(res?.reference_outdated === true);
       setUnavailable(false);
     } catch (e) {
       if (isUnavailable(e)) { setUnavailable(true); setCandidates([]); } else setError(errorText(e));
@@ -353,23 +389,27 @@ function VoiceReferenceBlock({ bookId, hero, busy, act, setError, timbreDirty }:
   // Reload when the hero (or its pinned reference) changes.
   useEffect(() => { void load(); }, [load, hero.rev]);
 
-  // While a design command runs, poll the candidate list (no generation is
-  // started from here — only the list is re-read).
+  // While a design / upload command runs, re-read the list every 3 s (no
+  // generation is started from here — only the list is re-read).
   useEffect(() => {
     if (!pending) return;
-    const timer = setTimeout(() => { void load(); }, 3000);
+    const timer = setTimeout(() => { void load(); }, CANDIDATES_POLL_MS);
     return () => clearTimeout(timer);
   }, [pending, candidates, load]);
 
   const hasTimbre = (hero.voice?.timbre ?? '').trim() !== '';
+  const outdatedNow = hero.voice?.reference_outdated === true || (pinned && outdated);
+  const others = (candidates ?? []).filter((c) => !c.pinned);
 
   return (
-    <div class="hero-ref">
+    <div class="hero-ref" data-testid="hero-voice-reference">
       <div class="hero-ref__head">
         <span class="hero-ref__title">{t('hero_section_reference')}</span>
         <span class={`hero-badge hero-badge--${status}`}>{t(REF_STATUS_KEYS[status])}</span>
         {ref?.verification && <span class={`hero-badge hero-badge--verify-${ref.verification}`}>{tf('hero_ref_verification', ref.verification)}</span>}
+        {outdatedNow && <span class="hero-badge hero-badge--outdated" data-testid="hero-ref-outdated" title={t('hero_ref_outdated_hint')}>{t('hero_ref_outdated')}</span>}
       </div>
+      {outdatedNow && <p class="hero-field__hint">{t('hero_ref_outdated_hint')}</p>}
 
       {ref && (
         <div class="hero-ref__pinned">
@@ -388,46 +428,81 @@ function VoiceReferenceBlock({ bookId, hero, busy, act, setError, timbreDirty }:
 
       {unavailable ? <p class="hero-empty">{t('hero_ref_unavailable')}</p> : (
         <div class="hero-ref__candidates">
-          {(candidates ?? []).filter((c) => !c.pinned).map((c) => (
-            <div class="hero-ref__candidate" key={c.name}>
-              <audio class="hero-ref__audio" controls preload="none" src={voiceFileUrl(bookId, hero.id, c.name)} />
-              <div class="hero-ref__candidate-row">
-                <span class="hero-ref__meta">{[c.name, c.source, c.verification].filter(Boolean).join(' · ')}</span>
-                <button class="btn btn--outlined hero-btn-sm" type="button" disabled={busy}
-                  onClick={() => void act(() => pinVoiceReference(bookId, hero.id, c.name))}>
-                  <IconCheck width={14} height={14} /> {t('hero_ref_pin')}
-                </button>
+          {others.map((c) => {
+            const line = candidateLine(c);
+            const uploaded = c.source === 'uploaded';
+            return (
+              <div class="hero-ref__candidate" key={c.name} data-candidate={c.name}>
+                {c.status === 'ready' && <audio class="hero-ref__audio" controls preload="none" src={voiceFileUrl(bookId, hero.id, c.name)} />}
+                <div class="hero-ref__candidate-row">
+                  <span class={`hero-ref__meta hero-ref__state hero-ref__state--${c.status ?? 'ready'}`}>
+                    {[c.name, c.source, `${t(line.key)}${line.detail ? `: ${line.detail}` : ''}`,
+                      typeof c.duration_ms === 'number' ? `${(c.duration_ms / 1000).toFixed(1)} s` : null].filter(Boolean).join(' · ')}
+                  </span>
+                </div>
+                {c.ref_text && !uploaded && <p class="hero-ref__text">«{c.ref_text}»</p>}
+                {uploaded && c.status === 'ready' && (
+                  <label class="hero-ref__upload-text">
+                    <span class="edit-field__label">{t('hero_ref_text')}</span>
+                    <input class="edit-field__input" type="text" value={refTexts[c.name] ?? c.ref_text ?? ''}
+                      onInput={(e) => { const v = (e.target as HTMLInputElement).value; setRefTexts((m) => ({ ...m, [c.name]: v })); }} />
+                  </label>
+                )}
+                <div class="hero-ref__actions">
+                  {canPinCandidate(c) && !pinned && (
+                    <button class="btn btn--outlined hero-btn-sm" type="button" disabled={busy}
+                      onClick={() => void act(() => pinVoiceReference(bookId, hero.id, c.name,
+                        uploaded && refTexts[c.name] !== undefined ? refTexts[c.name] : undefined))}>
+                      <IconCheck width={14} height={14} /> {t('hero_ref_pin')}
+                    </button>
+                  )}
+                  {canDeleteCandidate(c) && (
+                    <button class="hero-link hero-link--danger" type="button" disabled={busy}
+                      onClick={() => void act(() => deleteVoiceCandidate(bookId, hero.id, c.name)).then((ok) => { if (ok) void load(); })}>
+                      {t('hero_ref_delete_candidate')}
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
-          {candidates !== null && candidates.filter((c) => !c.pinned).length === 0 && !pending && <p class="hero-empty">{t('hero_ref_no_candidates')}</p>}
-          {pending && <p class="hero-empty">{t('hero_ref_pending')}</p>}
+            );
+          })}
+          {candidates !== null && others.length === 0 && !pending && <p class="hero-empty">{t('hero_ref_no_candidates')}</p>}
+          {pending && <p class="hero-empty" data-testid="hero-ref-pending">{t('hero_ref_pending')}</p>}
 
-          <div class="hero-ref__actions">
-            {/* The ONLY generation command of the card — fired by this click, nowhere else. */}
-            <button class="btn btn--outlined hero-btn-sm" type="button"
-              disabled={busy || pending || !hasTimbre || timbreDirty}
-              title={!hasTimbre ? t('hero_ref_need_timbre') : timbreDirty ? t('hero_ref_save_first') : undefined}
-              onClick={(e) => { const action = userClick(e, 'hero_card.voice_design'); void act(() => designVoiceCandidates(bookId, hero.id, action)).then((ok) => { if (ok) void load(); }); }}>
-              <IconSparkle width={14} height={14} /> {t('hero_ref_design')}
-            </button>
-            <button class="btn btn--outlined hero-btn-sm" type="button" disabled={busy} onClick={() => fileInput.current?.click()}>
-              <IconAdd width={14} height={14} /> {t('hero_ref_upload')}
-            </button>
-            <input ref={fileInput} type="file" accept="audio/wav,audio/x-wav,audio/flac,audio/mpeg,audio/ogg,.wav,.flac,.mp3,.ogg" hidden
-              onChange={(e) => {
-                const input = e.target as HTMLInputElement;
-                const file = input.files?.[0];
-                input.value = '';
-                if (!file) return;
-                void act(() => uploadVoiceCandidate(bookId, hero.id, file, uploadText.trim())).then((ok) => { if (ok) { setUploadText(''); void load(); } });
-              }} />
-          </div>
-          {(!hasTimbre || timbreDirty) && <p class="hero-field__hint">{t(!hasTimbre ? 'hero_ref_need_timbre' : 'hero_ref_save_first')}</p>}
-          <label class="hero-ref__upload-text">
-            <span class="edit-field__label">{t('hero_ref_text')}</span>
-            <input class="edit-field__input" type="text" value={uploadText} onInput={(e) => setUploadText((e.target as HTMLInputElement).value)} />
-          </label>
+          {!pinned && (
+            <div class="hero-ref__actions">
+              {/* The ONLY generation command of the card — fired by this click, nowhere else. */}
+              <button class="btn btn--outlined hero-btn-sm" type="button" data-testid="hero-ref-design"
+                disabled={busy || pending || !hasTimbre || timbreDirty}
+                title={!hasTimbre ? t('hero_ref_need_timbre') : timbreDirty ? t('hero_ref_save_first') : undefined}
+                onClick={(e) => { const action = userClick(e, 'hero_card.voice_design'); void act(() => designVoiceCandidates(bookId, hero.id, action)).then((ok) => { if (ok) void load(); }); }}>
+                <IconSparkle width={14} height={14} /> {t('hero_ref_design')}
+              </button>
+              <button class="btn btn--outlined hero-btn-sm" type="button" disabled={busy || pending} onClick={() => fileInput.current?.click()}>
+                <IconAdd width={14} height={14} /> {t('hero_ref_upload')}
+              </button>
+              <input ref={fileInput} type="file" accept="audio/wav,audio/x-wav,audio/flac,audio/mpeg,audio/ogg,.wav,.flac,.mp3,.ogg" hidden
+                data-testid="hero-ref-upload-input"
+                onChange={(e) => {
+                  const input = e.target as HTMLInputElement;
+                  const file = input.files?.[0];
+                  input.value = '';
+                  if (!file) return;
+                  // Uploading is a command too (GPU transcription): the proof
+                  // comes from this user event (HERO_CARD.md §10 п.1).
+                  const action = userClick(e, 'hero_card.voice_upload');
+                  void act(() => uploadVoiceCandidate(bookId, hero.id, file, uploadText, action)).then((ok) => { if (ok) { setUploadText(''); void load(); } });
+                }} />
+            </div>
+          )}
+          {!pinned && (!hasTimbre || timbreDirty) && <p class="hero-field__hint">{t(!hasTimbre ? 'hero_ref_need_timbre' : 'hero_ref_save_first')}</p>}
+          {!pinned && (
+            <label class="hero-ref__upload-text">
+              <span class="edit-field__label">{t('hero_ref_upload_text')}</span>
+              <input class="edit-field__input" type="text" value={uploadText} onInput={(e) => setUploadText((e.target as HTMLInputElement).value)} />
+            </label>
+          )}
+          {pinned && <p class="hero-field__hint">{t('hero_ref_pinned_hint')}</p>}
         </div>
       )}
     </div>

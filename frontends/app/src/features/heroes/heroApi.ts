@@ -8,7 +8,7 @@
 // Generation endpoints (designVoiceCandidates) carry `client_action` exactly
 // like /regenerate: they may be called from a click handler only.
 import { deleteJson, getJson, mediaUrl, patchJson, postForm, postJson } from '../../api/client';
-import type { HeroRule, LookAssignment, LookFields, VoiceReference } from './heroModel';
+import type { DirtyScene, Hero, HeroRule, LookAssignment, LookFields, VoiceReference } from './heroModel';
 
 const book = (bookId: string): string => `/book/${encodeURIComponent(bookId)}`;
 const hero = (bookId: string, heroId: string): string => `${book(bookId)}/heroes/${encodeURIComponent(heroId)}`;
@@ -21,17 +21,41 @@ export interface CreateHeroBody {
   voice?: Record<string, unknown>;
 }
 
-export function createHero(bookId: string, body: CreateHeroBody): Promise<{ hero_id: string }> {
+/** 201 `{hero_id, hero, rev}` (VBOOK_FORMAT_V4.md §12е). */
+export interface CreateHeroResult {
+  hero_id: string;
+  hero?: Hero;
+  rev?: string;
+}
+
+export function createHero(bookId: string, body: CreateHeroBody): Promise<CreateHeroResult> {
   return postJson(`${book(bookId)}/heroes`, body);
 }
 
+/** 200 of a hero / look mutation — the scenes whose image / video became stale. */
+export interface HeroMutationResult {
+  hero?: Hero;
+  rev?: string;
+  dirty_scenes?: DirtyScene[];
+  [key: string]: unknown;
+}
+
 /** `ifRev` — optimistic lock: 409 rev_conflict when the hero changed elsewhere. */
-export function patchHero(bookId: string, heroId: string, fields: Record<string, unknown>, ifRev?: string | null): Promise<unknown> {
+export function patchHero(bookId: string, heroId: string, fields: Record<string, unknown>, ifRev?: string | null): Promise<HeroMutationResult> {
   return patchJson(hero(bookId, heroId), ifRev ? { fields, if_rev: ifRev } : { fields });
 }
 
-export function deleteHero(bookId: string, heroId: string, opts: { broken?: boolean } = {}): Promise<unknown> {
+export function deleteHero(bookId: string, heroId: string, opts: { broken?: boolean } = {}): Promise<HeroMutationResult> {
   return deleteJson(hero(bookId, heroId) + (opts.broken ? '?broken=1' : ''));
+}
+
+/**
+ * A broken file of characters/ whose name is not a hero id (`Юра.json`,
+ * `notes.txt`) — only a name listed in the current hero_issues (решение В14).
+ * `file` is the plain name, without "characters/".
+ */
+export function deleteBrokenHeroFile(bookId: string, file: string): Promise<{ deleted: boolean; file: string }> {
+  return deleteJson(`${book(bookId)}/hero-files?file=${encodeURIComponent(file)}`);
 }
 
 // ── Rules ────────────────────────────────────────────────────────────────
@@ -50,21 +74,21 @@ export function deleteRule(bookId: string, heroId: string, ruleId: string): Prom
 
 // ── Looks (passport overrides) ───────────────────────────────────────────
 
-export function createLook(bookId: string, heroId: string, body: { id?: string; label: string; fields: LookFields; notes?: string }): Promise<{ look_id: string }> {
+export function createLook(bookId: string, heroId: string, body: { id?: string; label: string; fields: LookFields; notes?: string }): Promise<{ look_id: string; dirty_scenes?: DirtyScene[] }> {
   return postJson(`${hero(bookId, heroId)}/looks`, body);
 }
 
-export function patchLook(bookId: string, heroId: string, lookId: string, fields: Record<string, unknown>): Promise<unknown> {
+export function patchLook(bookId: string, heroId: string, lookId: string, fields: Record<string, unknown>): Promise<HeroMutationResult> {
   return patchJson(`${hero(bookId, heroId)}/looks/${encodeURIComponent(lookId)}`, { fields });
 }
 
 /** Deleting a look releases every chapter / scene that referenced it. */
-export function deleteLook(bookId: string, heroId: string, lookId: string): Promise<unknown> {
+export function deleteLook(bookId: string, heroId: string, lookId: string): Promise<HeroMutationResult> {
   return deleteJson(`${hero(bookId, heroId)}/looks/${encodeURIComponent(lookId)}`);
 }
 
 /** lookId: a look id, "base" (scenes only — base passport against the chapter) or null (release). */
-export function assignLook(bookId: string, heroId: string, lookId: string | null, places: LookAssignment): Promise<unknown> {
+export function assignLook(bookId: string, heroId: string, lookId: string | null, places: LookAssignment): Promise<HeroMutationResult> {
   return postJson(`${book(bookId)}/looks/assign`, { hero_id: heroId, look_id: lookId, chapters: places.chapters, scenes: places.scenes });
 }
 
@@ -75,18 +99,34 @@ export function lookImageUrl(bookId: string, heroId: string, lookId: string, sha
 
 // ── Voice reference (endpoints owned by the reference-voices task) ────────
 
-export interface VoiceCandidate extends VoiceReference {
-  /** File name inside build_<book>/voices/<hero>/ — the candidate's address. */
+export type CandidateStatus = 'pending' | 'ready' | 'failed';
+
+/** One candidate of GET …/voice/candidates (VBOOK_FORMAT_V4.md §12е). */
+export interface VoiceCandidate extends Partial<Omit<VoiceReference, 'verification' | 'model' | 'seed'>> {
+  model?: string | null;
+  seed?: number | null;
+  /** File name `<candidate_id>.wav` inside build_<book>/voices/<hero>/ — the candidate's address. */
   name: string;
-  duration_ms?: number;
+  candidate_id?: string;
+  status?: CandidateStatus;
+  verification?: 'passed' | 'failed' | string | null;
+  verification_problems?: string[];
+  ref_text_source?: 'user' | 'asr' | string | null;
+  duration_ms?: number | null;
   pinned?: boolean;
-  state?: 'ok' | 'missing' | 'mismatch';
+  error?: string;
 }
 
 export interface VoiceCandidatesResponse {
   candidates: VoiceCandidate[];
-  /** A design command is running — poll again. */
+  /** A design / upload command is running — the card re-reads the list every 3 s. */
   pending?: boolean;
+  reference_status?: string;
+  /** The pinned reference was made from another timbre (designed only). */
+  reference_outdated?: boolean;
+  design_description?: string;
+  phrase?: { id: string; version: number; style: string; text: string; language: string } | null;
+  duration_bounds_sec?: [number, number];
 }
 
 export function listVoiceCandidates(bookId: string, heroId: string): Promise<VoiceCandidatesResponse> {
@@ -113,16 +153,26 @@ export function designVoiceCandidates(bookId: string, heroId: string, action: Us
   return postJson(`${hero(bookId, heroId)}/voice/candidates/design`, { count, client_action: action });
 }
 
-export function uploadVoiceCandidate(bookId: string, heroId: string, file: File, refText: string): Promise<unknown> {
+/**
+ * EXPLICIT command too (the transcription runs on a GPU worker): the form
+ * carries `client_action` as a JSON string — without it 400 no_user_action.
+ */
+export function uploadVoiceCandidate(bookId: string, heroId: string, file: File, refText: string, action: UserClick): Promise<{ name: string }> {
   const form = new FormData();
   form.append('file', file, file.name);
-  form.append('ref_text', refText);
+  if (refText.trim() !== '') form.append('ref_text', refText.trim());
+  form.append('client_action', JSON.stringify(action));
   return postForm(`${hero(bookId, heroId)}/voice/candidates/upload`, form);
 }
 
-/** Pin a candidate as voice.reference with locked: true. */
-export function pinVoiceReference(bookId: string, heroId: string, name: string): Promise<unknown> {
-  return postJson(`${hero(bookId, heroId)}/voice/reference`, { name, locked: true });
+/** Delete a candidate (the pinned one — 409 candidate_locked, a pending one — 409 candidate_pending). */
+export function deleteVoiceCandidate(bookId: string, heroId: string, name: string): Promise<unknown> {
+  return deleteJson(`${hero(bookId, heroId)}/voice/candidates/${encodeURIComponent(name)}`);
+}
+
+/** Pin a candidate as voice.reference with locked: true; `refText` — a corrected text of an uploaded sample. */
+export function pinVoiceReference(bookId: string, heroId: string, name: string, refText?: string): Promise<unknown> {
+  return postJson(`${hero(bookId, heroId)}/voice/reference`, refText !== undefined ? { name, locked: true, ref_text: refText } : { name, locked: true });
 }
 
 export function clearVoiceReference(bookId: string, heroId: string): Promise<unknown> {
@@ -133,7 +183,7 @@ export function voiceFileUrl(bookId: string, heroId: string, name: string): stri
   return mediaUrl(`${hero(bookId, heroId)}/voice/file/${encodeURIComponent(name)}`);
 }
 
-// ── Image references ─────────────────────────────────────────────────────
+// ── Image references (backend step 7 — until then 404: the card degrades) ─
 
 export function uploadImageRef(bookId: string, heroId: string, file: File, kind: string): Promise<unknown> {
   const form = new FormData();

@@ -34,6 +34,11 @@ export interface HeroVoice {
   reference?: VoiceReference | null;
   /** Computed by the server, never stored. */
   reference_state?: RefState | null;
+  /**
+   * Computed by the server: the pinned DESIGNED reference was made from
+   * another timbre (owner's decision 18.11). Nothing regenerates by itself.
+   */
+  reference_outdated?: boolean | null;
   [key: string]: unknown;
 }
 
@@ -122,6 +127,22 @@ export interface HeroIssue {
   code: string;
   message?: string | null;
   blocking?: boolean;
+  /** possible_duplicate: the hero this one may be the same person as. */
+  of?: string | null;
+  /** possible_duplicate: the quotes the analysis saw. */
+  evidence?: string[] | null;
+  /** unknown_participant: the id a scene names that is no hero. */
+  participant?: string | null;
+  /** unknown_participant: where it is named. */
+  scenes?: { chapter_id: string; scene_id: string }[] | null;
+}
+
+/** One stale scene in the answer of a hero / look mutation (VBOOK_FORMAT_V4.md §8.2). */
+export interface DirtyScene {
+  chapter_id: string;
+  scene_id: string;
+  reason?: string;
+  dirty_layers?: string[];
 }
 
 /** Global behaviour document — behaviour.json. */
@@ -366,7 +387,8 @@ export function draftFromHero(hero: Hero): HeroDraft {
   };
 }
 
-export type HeroDraftError = 'hero_err_name_required' | 'hero_err_tokens_max' | 'hero_err_aliases_max' | 'hero_err_alias_is_name';
+export type HeroDraftError = 'hero_err_name_required' | 'hero_err_tokens_max' | 'hero_err_aliases_max' | 'hero_err_alias_is_name'
+  | 'hero_err_passport_has_looks';
 
 export function validateDraft(hero: Hero, draft: HeroDraft): HeroDraftError[] {
   const errors: HeroDraftError[] = [];
@@ -378,6 +400,9 @@ export function validateDraft(hero: Hero, draft: HeroDraft): HeroDraftError[] {
   if (aliases.length > ALIASES_MAX) errors.push('hero_err_aliases_max');
   const name = draft.name.trim().toLocaleLowerCase();
   if (name && aliases.some((a) => a.toLocaleLowerCase() === name)) errors.push('hero_err_alias_is_name');
+  // `passport: null` of a hero with looks is 400 invalid_character — a look
+  // without a passport is forbidden by the schema; the looks go first.
+  if (!draft.hasPassport && hero.passport && (hero.looks ?? []).length > 0) errors.push('hero_err_passport_has_looks');
   return errors;
 }
 
@@ -466,10 +491,95 @@ export function blockingIssues(issues: unknown): HeroIssue[] {
   return issues.filter((i): i is HeroIssue => isPlainObject(i) && typeof i.code === 'string' && i.blocking !== false);
 }
 
+/** Non-blocking warnings of one hero — the possible duplicates go to their own line. */
 export function heroWarnings(issues: unknown, heroId: string): HeroIssue[] {
   if (!Array.isArray(issues)) return [];
   return issues.filter((i): i is HeroIssue =>
-    isPlainObject(i) && typeof i.code === 'string' && i.blocking === false && i.hero_id === heroId);
+    isPlainObject(i) && typeof i.code === 'string' && i.blocking === false && i.hero_id === heroId
+    && i.code !== 'possible_duplicate');
+}
+
+/**
+ * `possible_duplicate` of this hero (VBOOK_FORMAT_V4.md §10.3, owner 18.11):
+ * the analysis thinks it may be the same person as `of`. A yellow line on the
+ * card of `hero_id`; nothing is merged.
+ */
+export function duplicateWarnings(issues: unknown, heroId: string): { of: string; evidence: string[] }[] {
+  if (!Array.isArray(issues)) return [];
+  const out: { of: string; evidence: string[] }[] = [];
+  for (const i of issues) {
+    if (!isPlainObject(i) || i.code !== 'possible_duplicate' || i.hero_id !== heroId || typeof i.of !== 'string') continue;
+    const evidence = Array.isArray(i.evidence) ? i.evidence.filter((e): e is string => typeof e === 'string' && e.trim() !== '') : [];
+    out.push({ of: i.of, evidence });
+  }
+  return out;
+}
+
+/** A scene participant that is no hero of the book (no hero_id): the book's problem list, with links to its scenes. */
+export interface UnknownParticipant {
+  participant: string;
+  message: string;
+  scenes: { chapter_id: string; scene_id: string }[];
+}
+
+export function unknownParticipants(issues: unknown): UnknownParticipant[] {
+  if (!Array.isArray(issues)) return [];
+  const out: UnknownParticipant[] = [];
+  for (const i of issues) {
+    if (!isPlainObject(i) || i.code !== 'unknown_participant' || typeof i.participant !== 'string') continue;
+    const scenes = Array.isArray(i.scenes)
+      ? i.scenes.filter((x): x is { chapter_id: string; scene_id: string } => isPlainObject(x) && typeof x.chapter_id === 'string' && typeof x.scene_id === 'string')
+      : [];
+    out.push({ participant: i.participant, message: typeof i.message === 'string' ? i.message : '', scenes });
+  }
+  return out;
+}
+
+/**
+ * How a broken tile is deleted: by hero id (`DELETE /heroes/:id?broken=1`)
+ * or — a file whose name is not an id (`Юра.json`, `notes.txt`) — by its plain
+ * name (`DELETE /hero-files?file=`). null — nothing addressable.
+ */
+export function brokenFileTarget(issue: HeroIssue): { kind: 'hero'; heroId: string } | { kind: 'file'; file: string } | null {
+  if (typeof issue.hero_id === 'string' && issue.hero_id !== '') return { kind: 'hero', heroId: issue.hero_id };
+  const file = typeof issue.file === 'string' ? issue.file.replace(/^characters\//, '') : '';
+  if (file === '' || file.includes('/')) return null;
+  return { kind: 'file', file };
+}
+
+/** The stale scenes of a mutation answer, summed up for one info line. */
+export function dirtySummary(dirty: unknown): { scenes: number; layers: string[] } {
+  if (!Array.isArray(dirty)) return { scenes: 0, layers: [] };
+  const keys = new Set<string>();
+  const layers = new Set<string>();
+  for (const d of dirty) {
+    if (!isPlainObject(d) || typeof d.chapter_id !== 'string' || typeof d.scene_id !== 'string') continue;
+    keys.add(`${d.chapter_id}/${d.scene_id}`);
+    if (Array.isArray(d.dirty_layers)) for (const l of d.dirty_layers) if (typeof l === 'string') layers.add(l);
+  }
+  return { scenes: keys.size, layers: [...layers].sort() };
+}
+
+// ── Voice reference candidates (HERO_CARD.md §6) ─────────────────────────
+
+/** Pin only a ready candidate whose automatic check passed (else 409 candidate_not_verified). */
+export function canPinCandidate(c: { status?: string | null; verification?: string | null; pinned?: boolean }): boolean {
+  return c.pinned !== true && c.status === 'ready' && c.verification === 'passed';
+}
+
+/** A candidate may be deleted unless it is pinned or still being made. */
+export function canDeleteCandidate(c: { status?: string | null; pinned?: boolean }): boolean {
+  return c.pinned !== true && c.status !== 'pending';
+}
+
+export type CandidateLineKey = 'hero_ref_cand_pending' | 'hero_ref_cand_failed' | 'hero_ref_cand_passed' | 'hero_ref_cand_rejected';
+
+/** The state line of a candidate: an i18n key + details (problems / error). */
+export function candidateLine(c: { status?: string | null; verification?: string | null; verification_problems?: string[] | null; error?: string | null }): { key: CandidateLineKey; detail: string } {
+  if (c.status === 'pending') return { key: 'hero_ref_cand_pending', detail: '' };
+  if (c.status === 'failed') return { key: 'hero_ref_cand_failed', detail: c.error ?? '' };
+  if (c.verification === 'passed') return { key: 'hero_ref_cand_passed', detail: '' };
+  return { key: 'hero_ref_cand_rejected', detail: (c.verification_problems ?? []).join(', ') };
 }
 
 // ── Unsupported book version (VBOOK_FORMAT_V4.md §9) ─────────────────────

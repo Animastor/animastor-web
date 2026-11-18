@@ -31,6 +31,28 @@ function notifyLoginRequired(path: string, status: number): void {
   }
 }
 
+/**
+ * The human text of an error body. VBook 4 routes answer `{error: <code>,
+ * message: <text>}` (VBOOK_FORMAT_V4.md §12е, HERO_CARD.md §10 п.5) — the
+ * message is shown, the code is for branching. Older routes put the text in
+ * `error` alone. Pure — exported for tests.
+ */
+export function errorBodyMessage(body: unknown): string {
+  if (!body || typeof body !== 'object') return '';
+  const b = body as { error?: unknown; message?: unknown };
+  if (typeof b.message === 'string' && b.message.trim() !== '') return b.message;
+  return typeof b.error === 'string' ? b.error : '';
+}
+
+/** The machine code of an error body: `code`, else `error` when a `message` carries the text. */
+export function errorBodyCode(body: unknown): string | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const b = body as { code?: unknown; error?: unknown; message?: unknown };
+  if (typeof b.code === 'string') return b.code;
+  if (typeof b.error === 'string' && typeof b.message === 'string' && /^[a-z0-9_]+$/.test(b.error)) return b.error;
+  return undefined;
+}
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -79,14 +101,14 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs: numbe
     if (!res.ok) {
       let msg = res.statusText;
       let body: unknown;
-      try { body = await res.json(); msg = (body as any)?.error || (body as any)?.message || msg; } catch { /* ignore */ }
+      try { body = await res.json(); msg = errorBodyMessage(body) || msg; } catch { /* ignore */ }
       // VBook 3.1 book (open or import): every screen that prints e.message
       // shows the same clear text instead of the machine code.
       if ((body as any)?.error === 'unsupported_vbook_version') {
         msg = tf('vbook_unsupported_body', String((body as any)?.vbook_version ?? '?'), Number((body as any)?.supported ?? 4));
       }
       notifyLoginRequired(path, res.status);
-      throw new ApiError(msg, res.status, (body as any)?.code, body);
+      throw new ApiError(msg, res.status, errorBodyCode(body), body);
     }
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
@@ -114,8 +136,9 @@ const NO_STORE_GET_PATHS: readonly RegExp[] = [
   /^\/worker\/counts(?:[/?]|$)/,
   // v2 generation API (/generate/*), present and future
   /^\/generate(?:[/?]|$)/,
-  // voice references (VOICE_REFERENCES.md) — polled while candidates are generated
-  /^\/book\/[^/?]+\/voices\/references(?:[/?]|$)/,
+  // voice reference candidates of a hero (HERO_CARD.md §6) — polled every 3 s
+  // while a design / upload command runs
+  /^\/book\/[^/?]+\/heroes\/[^/?]+\/voice\/candidates(?:[/?]|$)/,
 ];
 
 /** `true` when a GET of `path` must bypass the browser HTTP cache (polls,

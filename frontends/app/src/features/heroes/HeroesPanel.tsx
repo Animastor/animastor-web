@@ -12,10 +12,10 @@ import { t, tf } from '../../app/i18n';
 import type { StrKey } from '../../app/i18n';
 import { IconAdd, IconImage, IconVolumeUp } from '../../app/icons';
 import { Modal } from '../../lib/ui';
-import { HeroCard, Portrait, REF_STATUS_KEYS } from './HeroCard';
-import { createHero, deleteHero } from './heroApi';
+import { HeroCard, Portrait, REF_STATUS_KEYS, errorText } from './HeroCard';
+import { createHero, deleteBrokenHeroFile, deleteHero } from './heroApi';
 import {
-  blockingIssues, findHero, heroKind, heroStats, isNarrator, orderHeroes, validateNewHeroId,
+  blockingIssues, brokenFileTarget, findHero, heroKind, heroStats, isNarrator, orderHeroes, validateNewHeroId,
 } from './heroModel';
 import type { BehaviourGlobals, Hero, HeroIssue, LookChapter } from './heroModel';
 
@@ -80,16 +80,19 @@ export function HeroesPanel({ bookId, heroes: rawHeroes, globals, issues: rawIss
   useEffect(() => { setOpenId(null); }, [bookId]);
 
   const removeBroken = useCallback(async () => {
-    const id = brokenTarget?.hero_id;
-    if (!id) return;
+    const target = brokenTarget ? brokenFileTarget(brokenTarget) : null;
+    if (!target) return;
     setBusy(true);
     setError(null);
     try {
-      await deleteHero(bookId, id, { broken: true });
+      // A file named by a hero id → DELETE /heroes/:id?broken=1; any other
+      // name (Юра.json, notes.txt) → DELETE /hero-files?file=<name> (В14).
+      if (target.kind === 'hero') await deleteHero(bookId, target.heroId, { broken: true });
+      else await deleteBrokenHeroFile(bookId, target.file);
       setBrokenTarget(null);
       await onChanged();
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -113,7 +116,7 @@ export function HeroesPanel({ bookId, heroes: rawHeroes, globals, issues: rawIss
             <span class="hero-tile__name">{issue.hero_id ?? issue.file ?? '?'}</span>
             <span class="hero-tile__role">{t('hero_broken_title')}</span>
             <span class="hero-tile__issue">{issue.message || issue.code}</span>
-            {issue.hero_id && (
+            {brokenFileTarget(issue) && (
               <button class="hero-link hero-link--danger" type="button" onClick={() => { setError(null); setBrokenTarget(issue); }}>
                 {t('hero_broken_delete')}
               </button>
@@ -174,7 +177,7 @@ function AddHeroDialog({ bookId, existingIds, onClose, onCreated }: {
     } catch (e) {
       const code = e instanceof ApiError ? (e.body as { error?: string } | undefined)?.error : undefined;
       const known: Record<string, StrKey> = { hero_exists: 'hero_id_taken', reserved_id: 'hero_id_reserved' };
-      setError(code && known[code] ? t(known[code]) : (e as Error).message);
+      setError(code && known[code] ? t(known[code]) : errorText(e));
       setBusy(false);
     }
   };

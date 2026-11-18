@@ -11,6 +11,8 @@ vi.mock('./heroApi', async (orig) => {
     createHero: vi.fn(async () => ({ hero_id: 'ivan' })),
     patchHero: vi.fn(async () => ({})),
     deleteHero: vi.fn(async () => ({})),
+    deleteBrokenHeroFile: vi.fn(async () => ({ deleted: true })),
+    deleteVoiceCandidate: vi.fn(async () => ({})),
     createRule: vi.fn(async () => ({})),
     patchRule: vi.fn(async () => ({})),
     deleteRule: vi.fn(async () => ({})),
@@ -84,6 +86,18 @@ describe('heroes grid', () => {
     await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
   });
 
+  it('a broken file whose name is not an id is deleted by its name (/hero-files?file=)', async () => {
+    const issue = { file: 'characters/Юра.json', code: 'invalid_file_name', message: 'not a hero id', blocking: true };
+    const { container, onChanged } = mount([narrator], [issue]);
+    const broken = container.querySelector('.hero-tile--broken')!;
+    expect(broken.textContent).toContain('characters/Юра.json');
+    fireEvent.click(button(broken as HTMLElement, 'Удалить файл'));
+    fireEvent.click(button(document.querySelector('.modal') as HTMLElement, 'Удалить'));
+    await waitFor(() => expect(mock('deleteBrokenHeroFile')).toHaveBeenCalledWith('b1', 'Юра.json'));
+    expect(mock('deleteHero')).not.toHaveBeenCalled();
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+  });
+
   it('add dialog: validates the id locally and creates a hero of the chosen kind', async () => {
     const { container, onChanged } = mount();
     fireEvent.click(tile(container, 'Добавить героя'));
@@ -112,9 +126,57 @@ describe('hero sheet', () => {
 
   it('opening a card only READS candidates — no generation, no writes', async () => {
     await openYura();
-    expect(mock('designVoiceCandidates')).not.toHaveBeenCalled();
+    for (const [name, fn] of Object.entries(api)) {
+      if (!vi.isMockFunction(fn) || name === 'listVoiceCandidates') continue;
+      expect(fn, name).not.toHaveBeenCalled();
+    }
+  });
+
+  it('an error shows the server message; rev_conflict gets the clear text', async () => {
+    mock('patchHero').mockRejectedValueOnce(new ApiError('alias equals the name', 400, 'alias_equals_name', { error: 'alias_equals_name', message: 'alias equals the name' }));
+    const { container } = await openYura();
+    fireEvent.input(fieldByLabel(container, 'заметки'), { target: { value: 'x' } });
+    fireEvent.click(button(container, 'Сохранить'));
+    await waitFor(() => expect(container.querySelector('.hero-sheet__error')?.textContent).toBe('alias equals the name'));
+    mock('patchHero').mockRejectedValueOnce(new ApiError('changed', 409, 'rev_conflict', { error: 'rev_conflict', message: 'changed', rev: 'r9' }));
+    fireEvent.click(button(container, 'Сохранить'));
+    await waitFor(() => expect(container.querySelector('.hero-sheet__error')?.textContent).toContain('Героя изменили в другом месте'));
+  });
+
+  it('dirty_scenes of the answer become one info line', async () => {
+    mock('patchHero').mockResolvedValueOnce({ rev: 'r2', dirty_scenes: [
+      { chapter_id: 'ch-000001', scene_id: 'sc-000011', reason: 'passport', dirty_layers: ['image', 'video'] },
+      { chapter_id: 'ch-000002', scene_id: 'sc-000021', reason: 'passport', dirty_layers: ['image'] },
+    ] });
+    const { container } = await openYura();
+    fireEvent.input(fieldByLabel(container, 'одежда'), { target: { value: 'a grey coat' } });
+    fireEvent.click(button(container, 'Сохранить'));
+    await waitFor(() => expect(container.querySelector('.hero-sheet__notice')?.textContent).toBe('Изменение затронуло сцен: 2 (image, video) — они будут пересозданы при следующей генерации.'));
+  });
+
+  it('removing the appearance of a hero with looks is blocked with a hint (backend: 400 invalid_character)', async () => {
+    const { container } = await openYura();
+    const passport = [...container.querySelectorAll('.hero-section')].find((sec) => sec.querySelector('.hero-section__title')?.textContent === 'Внешность')!;
+    fireEvent.click(button(passport as HTMLElement, 'Убрать'));
+    expect(container.textContent).toContain('У героя есть облики — сначала удалите их');
+    expect(button(container, 'Сохранить').disabled).toBe(true);
     expect(mock('patchHero')).not.toHaveBeenCalled();
-    expect(mock('pinVoiceReference')).not.toHaveBeenCalled();
+  });
+
+  it('possible_duplicate is a yellow line on the card of hero_id with the other name and the evidence', async () => {
+    const issues = [{ code: 'possible_duplicate', hero_id: 'shop_women', of: 'yura', evidence: ['в будочке', 'кассирша'], blocking: false, message: 'm' }];
+    const { container } = mount([yura, narrator, shopWomen], issues);
+    fireEvent.click(tile(container, 'Женщина в будочке'));
+    await waitFor(() => expect(container.querySelector('[data-testid="hero-duplicate"]')).not.toBeNull());
+    const line = container.querySelector('[data-testid="hero-duplicate"]')!;
+    expect(line.className).toContain('hero-sheet__warn');
+    expect(line.textContent).toContain('Возможно, это тот же герой, что «Юра».');
+    expect(line.textContent).toContain('«в будочке» · «кассирша»');
+    cleanup();
+    const other = mount([yura, narrator, shopWomen], issues);
+    fireEvent.click(tile(other.container, 'Юра'));
+    await waitFor(() => expect(other.container.querySelector('.hero-sheet')).not.toBeNull());
+    expect(other.container.querySelector('[data-testid="hero-duplicate"]')).toBeNull();
   });
 
   it('save sends one PATCH with only the changed fields and the rev', async () => {
@@ -180,32 +242,115 @@ describe('hero sheet', () => {
       { id: 'yura.goes_silent', when: { emotion: ['angry'] }, then: { action: 'goes silent' }, probability: 0.35, enabled: true }]);
   });
 
+  async function openShopWomen() {
+    const view = mount();
+    fireEvent.click(tile(view.container, 'Женщина в будочке'));
+    await waitFor(() => expect(mock('listVoiceCandidates')).toHaveBeenCalledWith('b1', 'shop_women'));
+    return view;
+  }
+  const ready = (name: string, extra: Record<string, unknown> = {}) =>
+    ({ name, candidate_id: name.replace('.wav', ''), status: 'ready', source: 'designed', verification: 'passed', verification_problems: [], pinned: false, ...extra });
+
   it('«Создать кандидатов» is the only generation command and carries the click', async () => {
-    const { container } = await openYura();
+    const { container } = await openShopWomen();
     fireEvent.click(button(container, 'Создать кандидатов'));
     await waitFor(() => expect(mock('designVoiceCandidates')).toHaveBeenCalledTimes(1));
     const [bookId, heroId, action] = mock('designVoiceCandidates').mock.calls[0];
-    expect([bookId, heroId]).toEqual(['b1', 'yura']);
+    expect([bookId, heroId]).toEqual(['b1', 'shop_women']);
     expect(action).toMatchObject({ kind: 'user_click', source: 'hero_card.voice_design' });
     expect(typeof action.action_id).toBe('string');
   });
 
   it('candidates cannot be created from an unsaved or empty timbre', async () => {
-    const { container } = await openYura();
+    const { container } = await openShopWomen();
     fireEvent.input(fieldByLabel(container, 'тембр'), { target: { value: 'A girl.' } });
     expect(button(container, 'Создать кандидатов').disabled).toBe(true);
     expect(container.textContent).toContain('Сначала сохраните карточку.');
   });
 
-  it('pinning a candidate is explicit; the pinned one is not offered again', async () => {
-    mock('listVoiceCandidates').mockImplementation(async () => ({ candidates: [
-      { name: 'ref_02.wav', file: 'voices/yura/ref_02.wav', sha256: 'x', pinned: true },
-      { name: 'ref_03.wav', file: 'voices/yura/ref_03.wav', sha256: 'y', source: 'designed' },
-    ] }));
+  it('with a pinned reference no command is offered (backend: 409 reference_locked) — unpin first', async () => {
     const { container } = await openYura();
-    await waitFor(() => expect(container.querySelectorAll('.hero-ref__candidate').length).toBe(1));
-    fireEvent.click(button(container.querySelector('.hero-ref__candidate') as HTMLElement, 'Закрепить'));
-    await waitFor(() => expect(mock('pinVoiceReference')).toHaveBeenCalledWith('b1', 'yura', 'ref_03.wav'));
+    expect(button(container, 'Создать кандидатов')).toBeUndefined();
+    expect(button(container, 'Загрузить свой')).toBeUndefined();
+    expect(container.textContent).toContain('Чтобы создать или загрузить другой, сначала открепите его.');
+  });
+
+  it('pinning is explicit and only for ready + passed; the pinned one is not offered again', async () => {
+    mock('listVoiceCandidates').mockImplementation(async () => ({ candidates: [
+      ready('c1.wav', { pinned: true }),
+      ready('c2.wav'),
+      ready('c3.wav', { verification: 'failed', verification_problems: ['asr_mismatch'] }),
+      { name: 'c4.wav', status: 'pending', source: 'designed', pinned: false },
+      { name: 'c5.wav', status: 'failed', source: 'designed', error: 'worker timeout', pinned: false },
+    ] }));
+    const { container } = await openShopWomen();
+    await waitFor(() => expect(container.querySelectorAll('.hero-ref__candidate').length).toBe(4));
+    const cand = (name: string) => container.querySelector(`[data-candidate="${name}"]`) as HTMLElement;
+    expect(button(cand('c3.wav'), 'Закрепить')).toBeUndefined();
+    expect(cand('c3.wav').textContent).toContain('проверка не пройдена: asr_mismatch');
+    expect(button(cand('c4.wav'), 'Закрепить')).toBeUndefined();
+    expect(cand('c4.wav').textContent).toContain('создаётся…');
+    expect(button(cand('c4.wav'), 'Удалить')).toBeUndefined(); // a pending one is not deleted
+    expect(cand('c5.wav').textContent).toContain('не удалось: worker timeout');
+    fireEvent.click(button(cand('c2.wav'), 'Закрепить'));
+    await waitFor(() => expect(mock('pinVoiceReference')).toHaveBeenCalledWith('b1', 'shop_women', 'c2.wav', undefined));
+  });
+
+  it('a candidate is deleted by an explicit click', async () => {
+    mock('listVoiceCandidates').mockImplementation(async () => ({ candidates: [ready('c2.wav')] }));
+    const { container } = await openShopWomen();
+    await waitFor(() => expect(container.querySelector('[data-candidate="c2.wav"]')).not.toBeNull());
+    fireEvent.click(button(container.querySelector('[data-candidate="c2.wav"]') as HTMLElement, 'Удалить'));
+    await waitFor(() => expect(mock('deleteVoiceCandidate')).toHaveBeenCalledWith('b1', 'shop_women', 'c2.wav'));
+  });
+
+  it('upload is a command too: the form carries client_action from the user event', async () => {
+    const { container } = await openShopWomen();
+    fireEvent.input(container.querySelector('.hero-ref__upload-text input') as HTMLInputElement, { target: { value: 'Мы закрыты.' } });
+    expect(container.querySelector('.hero-ref__upload-text')?.textContent).toContain('Текст в загружаемой записи');
+    const input = container.querySelector('[data-testid="hero-ref-upload-input"]') as HTMLInputElement;
+    const file = new File([new Uint8Array([1, 2, 3])], 'me.wav', { type: 'audio/wav' });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    fireEvent.change(input);
+    await waitFor(() => expect(mock('uploadVoiceCandidate')).toHaveBeenCalledTimes(1));
+    const [bookId, heroId, sent, text, action] = mock('uploadVoiceCandidate').mock.calls[0];
+    expect([bookId, heroId, sent, text]).toEqual(['b1', 'shop_women', file, 'Мы закрыты.']);
+    expect(action).toMatchObject({ kind: 'user_click', source: 'hero_card.voice_upload' });
+    expect(typeof action.action_id).toBe('string');
+  });
+
+  it('while a command runs the list is re-read every 3 s — the poll starts nothing', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let calls = 0;
+      mock('listVoiceCandidates').mockImplementation(async () => {
+        calls += 1;
+        return calls < 3 ? { candidates: [{ name: 'c4.wav', status: 'pending', pinned: false }], pending: true } : { candidates: [ready('c4.wav')], pending: false };
+      });
+      const { container } = await openShopWomen();
+      await waitFor(() => expect(container.querySelector('[data-testid="hero-ref-pending"]')).not.toBeNull());
+      expect(calls).toBe(1);
+      await vi.advanceTimersByTimeAsync(2900);
+      expect(calls).toBe(1);
+      await vi.advanceTimersByTimeAsync(200);
+      await waitFor(() => expect(calls).toBe(2));
+      await vi.advanceTimersByTimeAsync(3100);
+      await waitFor(() => expect(calls).toBe(3));
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(calls).toBe(3); // no longer pending → no more polls
+      expect(mock('designVoiceCandidates')).not.toHaveBeenCalled();
+      expect(mock('uploadVoiceCandidate')).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reference_outdated is shown in the block header', async () => {
+    const stale: Hero = { ...yura, voice: { ...yura.voice!, reference_outdated: true } };
+    const { container } = mount([stale, narrator]);
+    fireEvent.click(tile(container, 'Юра'));
+    await waitFor(() => expect(container.querySelector('[data-testid="hero-ref-outdated"]')?.textContent).toBe('тембр изменён'));
+    expect(container.querySelector('.hero-ref__head [data-testid="hero-ref-outdated"]')).not.toBeNull();
   });
 
   it('a server without reference endpoints degrades the block, not the card', async () => {

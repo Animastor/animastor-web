@@ -1,7 +1,8 @@
 // Hero model — pure logic of the hero card (HERO_CARD.md §4, §5).
 import { describe, expect, it } from 'vitest';
 import {
-  allRuleIds, blockingIssues, diffDraft, draftFromHero, heroKind, heroMonogram, heroStats, heroWarnings,
+  allRuleIds, blockingIssues, brokenFileTarget, canDeleteCandidate, canPinCandidate, candidateLine, diffDraft,
+  dirtySummary, duplicateWarnings, unknownParticipants, draftFromHero, heroKind, heroMonogram, heroStats, heroWarnings,
   isDraftDirty, newRuleId, orderHeroes, portraitIndex, reactionsToText, referenceStatus, textToReactions,
   textToTokens, textToUniqueLines, unsupportedVbook, validateDraft, validateNewHeroId, voiceInstruct,
 } from './heroModel';
@@ -170,5 +171,65 @@ describe('heroes: issues and unsupported book', () => {
     expect(unsupportedVbook({ status: 404, body: { error: 'Book not found' } })).toBeNull();
     expect(unsupportedVbook(new Error('x'))).toBeNull();
     expect(unsupportedVbook(null)).toBeNull();
+  });
+});
+
+// ── Step 4 contract helpers (HERO_CARD.md §7, §10) ─────────────────────────
+
+describe('step 4 helpers', () => {
+  it('canPinCandidate: only ready + passed, never the pinned one', () => {
+    expect(canPinCandidate({ status: 'ready', verification: 'passed' })).toBe(true);
+    expect(canPinCandidate({ status: 'ready', verification: 'failed' })).toBe(false);
+    expect(canPinCandidate({ status: 'ready', verification: 'user' })).toBe(false);
+    expect(canPinCandidate({ status: 'pending', verification: 'passed' })).toBe(false);
+    expect(canPinCandidate({ status: 'ready', verification: 'passed', pinned: true })).toBe(false);
+    expect(canDeleteCandidate({ status: 'pending' })).toBe(false);
+    expect(canDeleteCandidate({ status: 'ready', pinned: true })).toBe(false);
+    expect(canDeleteCandidate({ status: 'failed' })).toBe(true);
+  });
+  it('candidateLine: pending / failed (error) / passed / rejected (problems)', () => {
+    expect(candidateLine({ status: 'pending' })).toEqual({ key: 'hero_ref_cand_pending', detail: '' });
+    expect(candidateLine({ status: 'failed', error: 'timeout' })).toEqual({ key: 'hero_ref_cand_failed', detail: 'timeout' });
+    expect(candidateLine({ status: 'ready', verification: 'passed' })).toEqual({ key: 'hero_ref_cand_passed', detail: '' });
+    expect(candidateLine({ status: 'ready', verification: 'failed', verification_problems: ['too_short', 'asr_mismatch'] }))
+      .toEqual({ key: 'hero_ref_cand_rejected', detail: 'too_short, asr_mismatch' });
+  });
+  it('duplicateWarnings: only possible_duplicate of this hero, evidence cleaned', () => {
+    const issues = [
+      { code: 'possible_duplicate', hero_id: 'koroviev', of: 'fagot', evidence: ['клетчатый', '', 3], blocking: false },
+      { code: 'possible_duplicate', hero_id: 'fagot', of: 'koroviev', blocking: false },
+      { code: 'unknown_key', hero_id: 'koroviev', blocking: false },
+    ];
+    expect(duplicateWarnings(issues, 'koroviev')).toEqual([{ of: 'fagot', evidence: ['клетчатый'] }]);
+    expect(duplicateWarnings(issues, 'fagot')).toEqual([{ of: 'koroviev', evidence: [] }]);
+    expect(duplicateWarnings(null, 'x')).toEqual([]);
+  });
+  it('heroWarnings leaves possible_duplicate to its own line', () => {
+    const issues = [{ code: 'possible_duplicate', hero_id: 'a', of: 'b', blocking: false }, { code: 'unknown_key', hero_id: 'a', blocking: false }];
+    expect(heroWarnings(issues, 'a').map((i) => i.code)).toEqual(['unknown_key']);
+  });
+  it('unknownParticipants: the participant with its scenes', () => {
+    const issues = [{ code: 'unknown_participant', participant: 'berlioz', message: 'm', scenes: [{ chapter_id: 'c1', scene_id: 's1' }, { bad: 1 }], blocking: false }];
+    expect(unknownParticipants(issues)).toEqual([{ participant: 'berlioz', message: 'm', scenes: [{ chapter_id: 'c1', scene_id: 's1' }] }]);
+  });
+  it('brokenFileTarget: by hero id, else by the plain file name', () => {
+    expect(brokenFileTarget({ code: 'invalid_json', hero_id: 'anna', file: 'characters/anna.json' })).toEqual({ kind: 'hero', heroId: 'anna' });
+    expect(brokenFileTarget({ code: 'invalid_file_name', file: 'characters/Юра.json' })).toEqual({ kind: 'file', file: 'Юра.json' });
+    expect(brokenFileTarget({ code: 'x', file: 'characters/sub/a.json' })).toBeNull();
+    expect(brokenFileTarget({ code: 'x' })).toBeNull();
+  });
+  it('dirtySummary: unique scenes and layers', () => {
+    expect(dirtySummary([
+      { chapter_id: 'c1', scene_id: 's1', dirty_layers: ['video', 'image'] },
+      { chapter_id: 'c1', scene_id: 's1', dirty_layers: ['image'] },
+      { chapter_id: 'c2', scene_id: 's1' },
+    ])).toEqual({ scenes: 2, layers: ['image', 'video'] });
+    expect(dirtySummary(undefined)).toEqual({ scenes: 0, layers: [] });
+  });
+  it('validateDraft: removing the passport of a hero with looks is an error (400 invalid_character)', () => {
+    const hero = { id: 'yura', name: 'Юра', passport: { appearance: 'a' }, looks: [{ id: 'coat', label: 'c', fields: { clothes: 'x' } }] };
+    const draft = { ...draftFromHero(hero), hasPassport: false };
+    expect(validateDraft(hero, draft)).toContain('hero_err_passport_has_looks');
+    expect(validateDraft({ ...hero, looks: [] }, draft)).not.toContain('hero_err_passport_has_looks');
   });
 });
