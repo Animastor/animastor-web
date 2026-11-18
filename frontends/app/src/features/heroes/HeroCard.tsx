@@ -49,8 +49,14 @@ export const REF_STATUS_KEYS: Record<ReferenceStatus, StrKey> = {
 export const CANDIDATES_POLL_MS = 3000;
 
 /** Endpoints that are not deployed yet answer 404/405/501 — the block degrades, the card keeps working. */
-function isUnavailable(e: unknown): boolean {
-  return e instanceof ApiError && (e.status === 404 || e.status === 405 || e.status === 501);
+export function isUnavailable(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return false;
+  if (e.status === 404 || e.status === 405 || e.status === 501) return true;
+  // The book cannot have references on this server / for this book (no
+  // build yet, legacy orchestration, orchestration v2 off): the block says
+  // so instead of a red error on a plain card open.
+  const code = (e.body as { error?: string } | undefined)?.error ?? e.code;
+  return code === 'book_without_build' || code === 'book_not_v2' || code === 'orch_v2_disabled';
 }
 
 /**

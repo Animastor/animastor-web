@@ -361,6 +361,16 @@ describe('hero sheet', () => {
     expect(fieldByLabel(container, 'тембр').value).toContain('warm low baritone');
   });
 
+  it('a book without references on this server (book_without_build / book_not_v2 / orch_v2_disabled) degrades the block too', async () => {
+    for (const [status, code] of [[409, 'book_without_build'], [409, 'book_not_v2'], [503, 'orch_v2_disabled']] as const) {
+      mock('listVoiceCandidates').mockRejectedValueOnce(new ApiError('m', status, code, { error: code, code, message: 'm' }));
+      const { container } = await openYura();
+      await waitFor(() => expect(container.textContent).toContain('Референсы голоса на этом сервере пока недоступны.'));
+      expect(container.querySelector('.hero-sheet__error')).toBeNull();
+      cleanup();
+    }
+  });
+
   it('with a pinned reference the manner hint says it no longer shapes the sound', async () => {
     const { container } = await openYura();
     expect(container.textContent).toContain('манера на звук не влияет');
