@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect } from 'preact/hooks';
+import { DEFAULT_REASONING, ReasoningSettings, reasoningBody, reasoningFromMeta } from '../features/ai/reasoning';
+import type { ReasoningValue } from '../features/ai/reasoning';
 import { applyTheme, applyLanguage, readPrefs, writePrefs } from '../app/theme';
 import type { ThemePref } from '../app/theme';
 import { t, tf } from '../app/i18n';
@@ -230,6 +232,8 @@ interface AiProviderMeta {
   connector_id?: string | null; // local-ai binding only (Local AI Connector V1)
   status: ProviderStatus;
   last_tested_at: number | null;
+  disable_thinking?: boolean;
+  reasoning_effort?: string | null;
 }
 interface AiProviderRead {
   provider: AiProviderMeta | null;
@@ -248,6 +252,7 @@ function AIProviderSection() {
   const [endpoint, setEndpoint] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('');
+  const [reasoning, setReasoning] = useState<ReasoningValue>(DEFAULT_REASONING);
   const [saved, setSaved] = useState<AiProviderMeta | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -276,6 +281,7 @@ function AIProviderSection() {
             setProviderType((meta.provider_type as ProviderType) || 'openai-compatible');
             setEndpoint(meta.endpoint || '');
             setModel(meta.model || '');
+            setReasoning(reasoningFromMeta(meta));
           }
         }
       } catch (e) {
@@ -304,6 +310,7 @@ function AIProviderSection() {
         provider_type: v.body.provider_type,
         endpoint: v.body.endpoint,
         model: v.body.model,
+        ...reasoningBody(reasoning),
       };
       if (v.body.api_key) body.api_key = v.body.api_key;
       const res = await putJson<{ provider: AiProviderMeta }>('/settings/ai/provider', body);
@@ -326,7 +333,7 @@ function AIProviderSection() {
       await deleteJson('/settings/ai/provider');
       setSaved(null);
       setProviderType('openai-compatible');
-      setEndpoint(''); setApiKey(''); setModel('');
+      setEndpoint(''); setApiKey(''); setModel(''); setReasoning(DEFAULT_REASONING);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -350,6 +357,8 @@ function AIProviderSection() {
       if (endpoint) body.endpoint = endpoint;
       if (apiKey.trim()) body.api_key = apiKey.trim();
       if (model) body.model = model;
+      // the test sends what the form shows — the same body the chat sends
+      Object.assign(body, reasoningBody(reasoning));
       const res = await postJson<AiProviderTest>('/settings/ai/test', body);
       const r = describeTestResult(res);
       if (r.kind === 'ok') {
@@ -469,6 +478,8 @@ function AIProviderSection() {
                 disabled={busy}
                 onInput={(e) => setModel((e.target as HTMLInputElement).value)}
               />
+
+              <ReasoningSettings value={reasoning} onChange={setReasoning} disabled={busy} />
 
               <div class="settings__actions">
                 <button class="btn btn--block" onClick={onSave} disabled={busy || !endpoint}>

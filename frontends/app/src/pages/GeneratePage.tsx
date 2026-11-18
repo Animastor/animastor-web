@@ -24,6 +24,7 @@ import { resilientReload, sharedRecovery } from '../state/resilientReloader';
 import { toast } from '../lib/ui';
 import { IconPlay, IconStop, IconSettings, IconLibrary, IconVolumeUp, IconVolumeOff, IconImage, IconImageOff, IconVideocam, IconVideocamOff } from '../app/icons';
 import { AnalysisProgressPanel } from './AnalysisProgressPanel';
+import { ReasoningBudgetNotice, isReasoningBudgetError } from '../features/ai/reasoning';
 
 // GeneratePage — 1:1 with GenerateFragment + fragment_generate.xml (stage 4).
 //  - Position bar (include_position_bar) → tap navigates to /navigate.
@@ -404,7 +405,11 @@ export function GeneratePage(props: { path?: string }) {
       >
         {/* Parallel AI Analysis progress panel (Milestone #2) — renders
             nothing in sequential mode; see AnalysisProgressPanel. */}
-        <AnalysisProgressPanel />
+        <>
+          <AnalysisProgressPanel />
+          {/* reasoning_budget_exhausted of the VBook analysis — plain words + a link to the provider settings */}
+          {isReasoningBudgetError(vbookProgress.value.message) && <ReasoningBudgetNotice />}
+        </>
       </WorkerSection>
 
       {/* Audio section */}
