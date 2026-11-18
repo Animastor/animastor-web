@@ -4,7 +4,7 @@ import { getJson, putJson, postJson } from '../api/client';
 import { Switch, ErrorText } from '../lib/ui';
 import { DEFAULT_REASONING, ReasoningSettings, reasoningBody, reasoningFromMeta } from '../features/ai/reasoning';
 import type { ReasoningValue } from '../features/ai/reasoning';
-import { authMe, login, logout, fetchMe } from '../state/authStore';
+import { authMe, login, logout, fetchMe, isAdminUser } from '../state/authStore';
 import {
   type ProviderType,
   type SystemAiState,
@@ -66,7 +66,7 @@ export function AdminPage(props: { path?: string }) {
 
   // Check admin role
   const user = me.value.user!;
-  const isAdmin = user.role === 'admin';
+  const isAdmin = isAdminUser(user);
   if (!isAdmin) {
     return (
       <section class="page page--centered">

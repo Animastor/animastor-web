@@ -17,7 +17,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { useEffect, useState } from 'preact/hooks';
-import { ReasoningBudgetNotice, isReasoningBudgetError } from '../features/ai/reasoning';
+import { ReasoningBudgetNotice, isReasoningBudgetError, reasoningBudgetProvider } from '../features/ai/reasoning';
 import { t, analysisTaskLabel, analysisTaskStatusLabel, tf } from '../app/i18n';
 import {
   vbookAnalysisProgress,
@@ -102,7 +102,7 @@ function TaskRow({ row, nowMs }: { row: AnalysisTaskRow; nowMs: number }) {
         )}
       </div>
       {row.status === 'failed' && row.error && (isReasoningBudgetError(row.error)
-        ? <ReasoningBudgetNotice />
+        ? <ReasoningBudgetNotice provider={reasoningBudgetProvider(row.error)} />
         : (
           <p class="analysis-row__error">
             {tf('progress_analysis_failed_detail', row.error)}

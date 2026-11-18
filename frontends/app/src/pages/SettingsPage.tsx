@@ -7,6 +7,7 @@ import { t, tf } from '../app/i18n';
 import type { StrKey } from '../app/i18n';
 import { getJson, postJson, putJson, deleteJson, ApiError } from '../api/client';
 import { bookId, resetProgressState } from '../state/generateStore';
+import { authMe, isAdminUser } from '../state/authStore';
 import { closeBook as closeGenerateBook } from '../state/fileStore';
 import { closeBook as closePlayerBook, clearMediaCache } from '@animastor/web-player';
 import { Modal, toast } from '../lib/ui';
@@ -832,8 +833,9 @@ function WorkerSection() {
   // Instant apply: the profile selection IS the save (global override).
   // PUT /connectors/profiles persists it; the backend honors it in prompt
   // assembly + skill injection. No Apply button.
+  const canEditProfile = isAdminUser(authMe.value.user);
   const saveProfile = async (profile: string) => {
-    if (saving) return;
+    if (saving || !canEditProfile) return;
     setSaving(true); setError('');
     try {
       await putJson('/connectors/profiles', { type, profile });
@@ -898,7 +900,7 @@ function WorkerSection() {
             class="select"
             value={displayProfile}
             aria-label={t(PROFILE_LABEL[type])}
-            disabled={saving}
+            disabled={saving || !canEditProfile}
             onChange={(e) => {
               const v = (e.target as HTMLSelectElement).value;
               setProfileName(v);
@@ -907,7 +909,9 @@ function WorkerSection() {
           >
             {profileOptions.map((o) => <option key={o} value={o}>{o}</option>)}
           </select>
-          <p class="card__hint">{t('settings_profiles_saved_and_applied')}</p>
+          {/* The profile is the ONE global override (PUT /connectors/profiles —
+              admin only since step 6): others see it read-only. */}
+          <p class="card__hint">{canEditProfile ? t('settings_profiles_saved_and_applied') : t('connector_profile_admin_only')}</p>
         </div>
 
         {/* ── Timeout ── */}

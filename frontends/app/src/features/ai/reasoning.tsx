@@ -7,9 +7,15 @@
 //   disable_thinking  boolean — chat_template_kwargs {enable_thinking:false}
 //   reasoning_effort  null (not sent) | none | minimal | low | medium | high
 // The analysis error `reasoning_budget_exhausted` (the model spent the whole
-// token budget on reasoning) is shown in plain words with a link here.
+// token budget on reasoning) is shown in plain words. Who can fix it depends
+// on the provider that answered (owner, step 6): the backend names it —
+// `provider_source` of a 400 body, or «Provider: system|personal.» in the
+// progress text:
+//   personal → a link to /settings/ai;
+//   system   → «ask the administrator»; an administrator gets a link to /admin.
 import type { JSX } from 'preact';
 import { t } from '../../app/i18n';
+import { authMe, isAdminUser } from '../../state/authStore';
 import { Switch } from '../../lib/ui';
 
 export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high'] as const;
@@ -51,12 +57,50 @@ export function isReasoningBudgetError(err: unknown): boolean {
   return typeof e.message === 'string' && BUDGET_TEXT.test(e.message);
 }
 
-/** The plain-words explanation with a link to the provider settings. */
-export function ReasoningBudgetNotice({ settingsHref = '/settings/ai' }: { settingsHref?: string }): JSX.Element {
+export type ReasoningProviderSource = 'system' | 'personal';
+
+const PROVIDER_MARK = /Provider: (system|personal)\./;
+
+/**
+ * Who answered with reasoning_budget_exhausted: the structured field
+ * (`provider_source` of the body / the error) or the fixed mark of the
+ * progress text. null — an older backend that does not say.
+ */
+export function reasoningBudgetProvider(err: unknown): ReasoningProviderSource | null {
+  if (err == null) return null;
+  const pick = (v: unknown): ReasoningProviderSource | null => (v === 'system' || v === 'personal' ? v : null);
+  if (typeof err === 'string') return pick(PROVIDER_MARK.exec(err)?.[1]);
+  const e = err as { provider_source?: unknown; message?: unknown; body?: { provider_source?: unknown; error?: unknown } };
+  return pick(e.provider_source) ?? pick(e.body?.provider_source)
+    ?? (typeof e.message === 'string' ? pick(PROVIDER_MARK.exec(e.message)?.[1]) : null)
+    ?? (typeof e.body?.error === 'string' ? pick(PROVIDER_MARK.exec(e.body.error)?.[1]) : null);
+}
+
+/** The plain-words text for the provider (the chat bubble uses it without a link). */
+export function reasoningBudgetText(provider: ReasoningProviderSource | null): string {
+  return provider === 'system' ? t('reasoning_budget_text_system') : t('reasoning_budget_text');
+}
+
+/**
+ * The plain-words explanation and the place to fix it: the personal
+ * provider → /settings/ai; the system one → «ask the administrator», with a
+ * link to the admin panel for an administrator. Unknown (an older backend) →
+ * the personal settings as before.
+ */
+export function ReasoningBudgetNotice({ provider = null }: { provider?: ReasoningProviderSource | null }): JSX.Element {
+  if (provider === 'system') {
+    const admin = isAdminUser(authMe.value.user);
+    return (
+      <p class="reasoning-budget" role="alert" data-testid="reasoning-budget" data-provider="system">
+        {t('reasoning_budget_text_system')}{' '}
+        {admin && <a class="hero-link" href="/admin">{t('reasoning_budget_link_admin')}</a>}
+      </p>
+    );
+  }
   return (
-    <p class="reasoning-budget" role="alert" data-testid="reasoning-budget">
+    <p class="reasoning-budget" role="alert" data-testid="reasoning-budget" data-provider={provider ?? 'unknown'}>
       {t('reasoning_budget_text')}{' '}
-      <a class="hero-link" href={settingsHref}>{t('reasoning_budget_link')}</a>
+      <a class="hero-link" href="/settings/ai">{t('reasoning_budget_link')}</a>
     </p>
   );
 }

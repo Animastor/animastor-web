@@ -5,7 +5,12 @@ import { signal } from '@preact/signals';
 import { getJson, postJson, setLoginRequiredHandler } from '../api/client';
 import { stashBookSessionForUser, restoreStashedBookSessionForUser } from './generateStore';
 
-export interface AuthUser { id: string; username: string; display_name?: string | null; role?: string; }
+export interface AuthUser { id: string; username: string; display_name?: string | null; role?: string; is_admin?: boolean; }
+
+/** Platform admin: the backend's is_admin (role OR ADMIN_USERNAMES); role='admin' for an older backend. */
+export function isAdminUser(user: AuthUser | null | undefined): boolean {
+  return !!user && (user.is_admin === true || user.role === 'admin');
+}
 export interface AuthWorkspace { id: string; name: string; type: string; }
 export interface AuthMe { authenticated: boolean; identity?: string; user: AuthUser | null; workspace: AuthWorkspace | null; }
 

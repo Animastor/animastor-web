@@ -24,7 +24,7 @@ import { resilientReload, sharedRecovery } from '../state/resilientReloader';
 import { toast } from '../lib/ui';
 import { IconPlay, IconStop, IconSettings, IconLibrary, IconVolumeUp, IconVolumeOff, IconImage, IconImageOff, IconVideocam, IconVideocamOff } from '../app/icons';
 import { AnalysisProgressPanel } from './AnalysisProgressPanel';
-import { ReasoningBudgetNotice, isReasoningBudgetError } from '../features/ai/reasoning';
+import { ReasoningBudgetNotice, isReasoningBudgetError, reasoningBudgetProvider } from '../features/ai/reasoning';
 
 // GeneratePage — 1:1 with GenerateFragment + fragment_generate.xml (stage 4).
 //  - Position bar (include_position_bar) → tap navigates to /navigate.
@@ -408,7 +408,7 @@ export function GeneratePage(props: { path?: string }) {
         <>
           <AnalysisProgressPanel />
           {/* reasoning_budget_exhausted of the VBook analysis — plain words + a link to the provider settings */}
-          {isReasoningBudgetError(vbookProgress.value.message) && <ReasoningBudgetNotice />}
+          {isReasoningBudgetError(vbookProgress.value.message) && <ReasoningBudgetNotice provider={reasoningBudgetProvider(vbookProgress.value.message)} />}
         </>
       </WorkerSection>
 
