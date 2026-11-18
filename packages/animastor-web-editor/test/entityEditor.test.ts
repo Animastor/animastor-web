@@ -17,8 +17,8 @@ describe('entityEditor', () => {
       expect(ENTITY_SCHEMAS.location.fields).toHaveLength(7);
     });
 
-    it('voice schema has 1 extra field', () => {
-      expect(ENTITY_SCHEMAS.voice.fields).toHaveLength(1);
+    it('voice schema: timbre + manner (VOICE_REFERENCES), no instruction', () => {
+      expect(ENTITY_SCHEMAS.voice.fields.map((f) => f.key)).toEqual(['timbre', 'manner']);
     });
 
     it('behavior schema has 1 extra field', () => {

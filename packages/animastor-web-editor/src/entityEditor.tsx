@@ -85,7 +85,9 @@ export const ENTITY_SCHEMAS: Record<EntityKind, EntitySchema> = {
     deleteTitleKey: 'entity_delete_voice',
     deleteConfirmKey: 'entity_delete_voice_confirm',
     fields: [
-      { key: 'instruction', labelKey: 'field_instruction', multiline: true },
+      // VOICE_REFERENCES.md: a voice is described by its constant timbre + manner
+      { key: 'timbre', labelKey: 'field_timbre', multiline: true },
+      { key: 'manner', labelKey: 'field_manner', multiline: true },
     ],
   },
   // Behavior is keyed by an EXISTING character_id (behavior.json mirrors

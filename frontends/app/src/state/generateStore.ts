@@ -614,7 +614,7 @@ export interface GenerationRequest {
 }
 export type GenerationResult =
   | { ok: true; dirty: number; scope: string }
-  | { ok: false; message: string; code?: 'layer_disabled' | 'no_user_action' };
+  | { ok: false; message: string; code?: 'layer_disabled' | 'no_user_action' | 'voice_reference_required' };
 
 // ── Explicit user action (reports/2026-11-04/regenerate-sweep-fix.md) ──
 // A GPU command (/regenerate) is sent ONLY from a click handler: the caller
@@ -697,6 +697,12 @@ export async function startGeneration(req: GenerationRequest, action: UserAction
         type === 'audio' ? t('progress_label_audio') : type === 'image' ? t('progress_label_image')
           : type === 'video' ? t('progress_label_video') : type);
       return { ok: false, code: 'layer_disabled', message: tf('generate_layer_disabled', labels) };
+    }
+    if (err.kind === 'voice_reference_required') {
+      isRegenerating.value = false;
+      progressTracking.newGenerationPending = false;
+      setGenerationStatus('IDLE');
+      return { ok: false, code: 'voice_reference_required', message: tf('voice_ref_required', err.characterIds.join(', ')) };
     }
     setGenerationStatus('ERROR');
     return { ok: false, message: err.message };

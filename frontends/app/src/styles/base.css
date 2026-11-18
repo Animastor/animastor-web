@@ -3376,3 +3376,17 @@ button { font: inherit; color: inherit; }
 .hero-assign__row { display: flex; align-items: center; gap: 0.5rem; min-height: 2.25rem; font-size: 0.875rem; color: var(--text); cursor: pointer; }
 .hero-assign__row--scene { padding-left: 1.5rem; font-size: 0.8125rem; color: var(--text-2); }
 .edit-scene-looks { display: flex; flex-direction: column; }
+/* Voice references block (Voices tab, VOICE_REFERENCES.md) */
+.voice-refs { display: flex; flex-direction: column; gap: 0.5rem; }
+.voice-refs__hint { margin: 0; color: var(--text-2); font-size: 0.8125rem; }
+.voice-refs__error { color: var(--error); font-size: 0.8125rem; }
+.voice-refs__voice { border-top: 1px solid var(--border, rgba(127, 127, 127, 0.25)); padding-top: 0.5rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.voice-refs__row { display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap; }
+.voice-refs__status { font-size: 0.75rem; color: var(--text-2); }
+.voice-refs__status--ok { color: var(--success); }
+.voice-refs__desc { font-size: 0.8125rem; }
+.voice-refs__actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.voice-refs__cand { display: flex; flex-direction: column; gap: 0.25rem; padding-left: 0.75rem; font-size: 0.8125rem; }
+.voice-refs__cand audio { max-width: 100%; }
+.voice-refs__transcript { color: var(--text-2); }
+.voice-refs__reftext { width: 100%; box-sizing: border-box; }

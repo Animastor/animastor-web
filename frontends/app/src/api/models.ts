@@ -390,8 +390,16 @@ export interface BookCharacter {
   passport?: CharPassport | null;
 }
 
+// VOICE_REFERENCES.md: {timbre, manner, timbre_source, reference}; the audio
+// reference itself lives in the content folder (build_<id>/voices/).
 export interface BookVoiceEntry {
-  instruction?: string | null;
+  timbre?: string | null;
+  manner?: string | null;
+  timbre_source?: 'cleaned' | 'user' | 'analysis' | null;
+  reference?: {
+    file: string; ref_text: string; source: 'designed' | 'uploaded'; sha256: string;
+    verification: 'passed' | 'failed'; locked: boolean; candidate_id?: string;
+  } | null;
 }
 
 // Per-character behavior — keyed by character_id, same pattern as voices.

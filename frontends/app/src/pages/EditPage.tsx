@@ -1458,8 +1458,10 @@ export function EditPage(props: { path?: string }) {
       });
       if (Object.keys(env).length > 0) body.environment = env;
     } else {
-      const instruction = (values.instruction ?? '').trim();
-      if (instruction) body.instruction = instruction;
+      const timbre = (values.timbre ?? '').trim();
+      const manner = (values.manner ?? '').trim();
+      if (timbre) body.timbre = timbre;
+      if (manner) body.manner = manner;
     }
     return body;
   }, []);

@@ -50,7 +50,8 @@ export type EditorI18nKey =
   | 'field_weather'
   | 'field_mood'
   | 'field_atmosphere'
-  | 'field_instruction'
+  | 'field_timbre'
+  | 'field_manner'
   | 'field_baseline'
   // form validation
   | 'entity_name_required'

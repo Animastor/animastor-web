@@ -11,6 +11,9 @@
 
 export type StartErrorKind =
   | { kind: 'layer_disabled'; workerTypes: string[] }
+  // VOICE_REFERENCES.md: 409 { code: 'voice_reference_required', character_ids } —
+  // no work was created; the user creates / locks the voice references first
+  | { kind: 'voice_reference_required'; characterIds: string[] }
   | { kind: 'other'; message: string };
 
 interface ErrorLike { status?: number; message?: string; body?: unknown }
@@ -19,7 +22,11 @@ interface ErrorLike { status?: number; message?: string; body?: unknown }
  *  types — the fallback when the server body lists none. */
 export function classifyStartError(e: unknown, requested: string[]): StartErrorKind {
   const err = (e ?? {}) as ErrorLike;
-  const body = (err.body ?? null) as { error?: unknown; disabled_worker_types?: unknown } | null;
+  const body = (err.body ?? null) as { error?: unknown; code?: unknown; disabled_worker_types?: unknown; character_ids?: unknown } | null;
+  if (err.status === 409 && body && body.code === 'voice_reference_required') {
+    const ids = Array.isArray(body.character_ids) ? body.character_ids.filter((x): x is string => typeof x === 'string') : [];
+    return { kind: 'voice_reference_required', characterIds: ids };
+  }
   if (err.status === 409 && body && body.error === 'layer_disabled') {
     const listed = Array.isArray(body.disabled_worker_types)
       ? body.disabled_worker_types.filter((x): x is string => typeof x === 'string')
