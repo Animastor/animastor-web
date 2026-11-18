@@ -27,7 +27,10 @@ import type { JSX } from 'preact';
 import { useState } from 'preact/hooks';
 import type { EditorI18nKey, EditorPorts } from './ports';
 
-export type EntityKind = 'character' | 'location' | 'voice' | 'behavior';
+// VBook 4 (0.3.0): characters, voices and behaviours are heroes — one file
+// per hero, edited on the hero card of the host (HERO_CARD.md). The generic
+// entity dialogs serve locations only.
+export type EntityKind = 'location';
 
 export interface EntityFieldDef {
   /** Flat form key — dotted for nested payload keys (passport.appearance). */
@@ -39,9 +42,9 @@ export interface EntityFieldDef {
 
 export interface EntitySchema {
   kind: EntityKind;
-  /** i18n key: add-dialog title ("Add character"). */
+  /** i18n key: add-dialog title ("Add location"). */
   addTitleKey: EditorI18nKey;
-  /** i18n key: delete-confirm title ("Delete character?"). */
+  /** i18n key: delete-confirm title ("Delete location?"). */
   deleteTitleKey: EditorI18nKey;
   /** i18n key: delete-confirm body ("Are you sure…"). */
   deleteConfirmKey: EditorI18nKey;
@@ -53,17 +56,6 @@ export interface EntitySchema {
 //    editor cards render and PATCH supports — legacy demo keys like
 //    base_appearance / cinematic_space are not part of the schema anymore). ──
 export const ENTITY_SCHEMAS: Record<EntityKind, EntitySchema> = {
-  character: {
-    kind: 'character',
-    addTitleKey: 'entity_add_character',
-    deleteTitleKey: 'entity_delete_character',
-    deleteConfirmKey: 'entity_delete_character_confirm',
-    fields: [
-      { key: 'passport.appearance', labelKey: 'field_appearance', multiline: true },
-      { key: 'passport.clothes', labelKey: 'field_clothes', multiline: true },
-      { key: 'passport.video_tokens', labelKey: 'field_video_tokens', multiline: true },
-    ],
-  },
   location: {
     kind: 'location',
     addTitleKey: 'entity_add_location',
@@ -77,30 +69,6 @@ export const ENTITY_SCHEMAS: Record<EntityKind, EntitySchema> = {
       { key: 'environment.weather', labelKey: 'field_weather' },
       { key: 'environment.mood', labelKey: 'field_mood' },
       { key: 'environment.atmosphere', labelKey: 'field_atmosphere' },
-    ],
-  },
-  voice: {
-    kind: 'voice',
-    addTitleKey: 'entity_add_voice',
-    deleteTitleKey: 'entity_delete_voice',
-    deleteConfirmKey: 'entity_delete_voice_confirm',
-    fields: [
-      // VOICE_REFERENCES.md: a voice is described by its constant timbre + manner
-      { key: 'timbre', labelKey: 'field_timbre', multiline: true },
-      { key: 'manner', labelKey: 'field_manner', multiline: true },
-    ],
-  },
-  // Behavior is keyed by an EXISTING character_id (behavior.json mirrors
-  // voices.json), so the generic add dialog (free-form id + name) is not used
-  // for it — BehaviorAddDialog below picks the character instead. The schema
-  // still carries the delete-confirm strings and the field list.
-  behavior: {
-    kind: 'behavior',
-    addTitleKey: 'entity_add_behavior',
-    deleteTitleKey: 'entity_delete_behavior',
-    deleteConfirmKey: 'entity_delete_behavior_confirm',
-    fields: [
-      { key: 'baseline', labelKey: 'field_baseline', multiline: true },
     ],
   },
 };
@@ -220,74 +188,6 @@ export function EntityEditorDialog({ ports, schema, existingIds, busy, error, on
             )}
           </div>
         ))}
-        {(formError || error) && <div class="entity-form__error">{(formError ?? error) as string}</div>}
-      </div>
-    </Modal>
-  );
-}
-
-// ── Behavior add dialog — a behavior belongs to an EXISTING character
-//    (behavior.json is keyed by character_id), so instead of the generic
-//    free-form id field the dialog picks a character that has no behavior
-//    yet. Same visual pattern (Modal + entity-form) as EntityEditorDialog. ──
-export function BehaviorAddDialog({ ports, characters, busy, error, onSave, onClose }: {
-  ports: EditorPorts;
-  /** Characters without a behavior yet: { id, name }. */
-  characters: { id: string; name: string }[];
-  busy: boolean;
-  error: string | null;
-  onSave: (values: { characterId: string; baseline: string }) => void;
-  onClose: () => void;
-}): JSX.Element {
-  const { t } = ports.i18n;
-  const { Modal } = ports.modal;
-  const [characterId, setCharacterId] = useState(characters[0]?.id ?? '');
-  const [baseline, setBaseline] = useState('');
-  const [formError, setFormError] = useState<string | null>(null);
-
-  const handleSave = () => {
-    if (!characterId) {
-      setFormError(t('behavior_character_required'));
-      return;
-    }
-    setFormError(null);
-    onSave({ characterId, baseline: baseline.trim() });
-  };
-
-  return (
-    <Modal title={t('entity_add_behavior')} onClose={onClose} footer={
-      <>
-        <button type="button" class="btn btn--outlined" disabled={busy} onClick={onClose}>{t('dialog_cancel')}</button>
-        <button type="button" class="btn" disabled={busy} onClick={handleSave}>
-          {busy ? t('edit_saving') : t('edit_save')}
-        </button>
-      </>
-    }>
-      <div class="entity-form">
-        <div class="edit-field">
-          <label class="edit-field__label" for="behavior-character">{t('behavior_character')} *</label>
-          <select
-            id="behavior-character"
-            class="edit-field__input"
-            value={characterId}
-            onChange={(e) => setCharacterId((e.target as HTMLSelectElement).value)}
-          >
-            {characters.map((c) => (
-              <option key={c.id} value={c.id}>{c.name ? `${c.name} (${c.id})` : c.id}</option>
-            ))}
-          </select>
-          <span class="entity-form__hint">{t('behavior_character_hint')}</span>
-        </div>
-        <div class="edit-field">
-          <label class="edit-field__label" for="behavior-baseline">{t('field_baseline')}</label>
-          <textarea
-            id="behavior-baseline"
-            class="edit-field__input edit-field__input--area"
-            rows={3}
-            value={baseline}
-            onInput={(e) => setBaseline((e.target as HTMLTextAreaElement).value)}
-          />
-        </div>
         {(formError || error) && <div class="entity-form__error">{(formError ?? error) as string}</div>}
       </div>
     </Modal>

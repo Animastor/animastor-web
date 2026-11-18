@@ -1419,9 +1419,9 @@ export function EditPage(props: { path?: string }) {
     };
   }, [updateTabScrollIndicators]);
 
-  // ── Entity add/delete (Characters / Locations / Voices) ──
+  // ── Entity add/delete (Locations; heroes live on the hero card) ──
   // Save/delete go through the dedicated backend endpoints (POST/DELETE
-  // /characters, /locations, /voices); after success the canonical book data is
+  // /locations); after success the canonical book data is
   // re-fetched so the table updates without a manual page reload. The id stays
   // free-form here — the server transliterates non-canonical input via the
   // existing backend utility (never duplicated on the client).
@@ -1435,34 +1435,22 @@ export function EditPage(props: { path?: string }) {
   const entityCollection = useCallback((kind: EntityKind): string =>
     kind === 'location' ? 'locations' : `${kind}s`, []);
 
-  const buildCreateBody = useCallback((kind: EntityKind, values: Record<string, string>): Record<string, unknown> => {
+  // VBook 4: the only generic entity left is a location (heroes have their
+  // own card — features/heroes).
+  const buildCreateBody = useCallback((_kind: EntityKind, values: Record<string, string>): Record<string, unknown> => {
     const body: Record<string, unknown> = {};
     const id = (values.id ?? '').trim();
     const name = (values.name ?? '').trim();
     if (id) body.id = id;
     if (name) body.name = name;
-    if (kind === 'character') {
-      const passport: Record<string, string> = {};
-      ['appearance', 'clothes', 'video_tokens'].forEach((f) => {
-        const v = (values[`passport.${f}`] ?? '').trim();
-        if (v) passport[f] = v;
-      });
-      if (Object.keys(passport).length > 0) body.passport = passport;
-    } else if (kind === 'location') {
-      const desc = (values.description ?? '').trim();
-      if (desc) body.description = desc;
-      const env: Record<string, string> = {};
-      ['time', 'season', 'lighting', 'weather', 'mood', 'atmosphere'].forEach((f) => {
-        const v = (values[`environment.${f}`] ?? '').trim();
-        if (v) env[f] = v;
-      });
-      if (Object.keys(env).length > 0) body.environment = env;
-    } else {
-      const timbre = (values.timbre ?? '').trim();
-      const manner = (values.manner ?? '').trim();
-      if (timbre) body.timbre = timbre;
-      if (manner) body.manner = manner;
-    }
+    const desc = (values.description ?? '').trim();
+    if (desc) body.description = desc;
+    const env: Record<string, string> = {};
+    ['time', 'season', 'lighting', 'weather', 'mood', 'atmosphere'].forEach((f) => {
+      const v = (values[`environment.${f}`] ?? '').trim();
+      if (v) env[f] = v;
+    });
+    if (Object.keys(env).length > 0) body.environment = env;
     return body;
   }, []);
 

@@ -6,7 +6,7 @@ Schema-driven editor UI primitives for Animastor web frontend.
 
 This package provides reusable editor components, canvas waveform rendering, and preview ID generation:
 
-- **Entity Editor** — schema-driven Add/Delete dialogs for Characters, Locations, Voices, Behaviors
+- **Entity Editor** — schema-driven Add/Delete dialogs for Locations (VBook 4: characters, voices and behaviours are heroes, edited on the host's hero card)
 - **Structure Editor** — Add dialog for Chapters, Scenes, Units (hierarchy with parent selection)
 - **Waveform** — canvas-based waveform renderer with draggable range selection and playback playhead
 - **ID Generator** — preview ID generation for chapters, scenes, units (client-side preview only)
@@ -54,7 +54,7 @@ const id = chapterId(); // "ch-a1b2c3d4"
 | `EditorIconComponent` | type | Icon component function type |
 | `EditorModalProps` | type | Modal component props |
 | `WaveformPeak` | type | Package-owned peak pair (pos/neg) |
-| `EntityKind` | type | `'character' | 'location' | 'voice' | 'behavior'` |
+| `EntityKind` | type | `'location'` (0.3.0; was `'character' | 'location' | 'voice' | 'behavior'`) |
 | `EntitySchema` | type | Schema for an entity kind |
 | `EntityFieldDef` | type | Field definition in an entity schema |
 | `StructureKind` | type | `'chapter' | 'scene' | 'unit'` |
@@ -63,7 +63,6 @@ const id = chapterId(); // "ch-a1b2c3d4"
 | `EntityAddButton` | component | Round "+" overlay button |
 | `EntityDeleteButton` | component | Small "−" destructive button |
 | `EntityEditorDialog` | component | Schema-driven add dialog |
-| `BehaviorAddDialog` | component | Behavior-specific add dialog (character picker) |
 | `DeleteConfirmDialog` | component | Destructive action confirmation |
 | `StructureAddDialog` | component | Chapter/Scene/Unit add dialog |
 | `Waveform` | component | Canvas waveform with range selection |

@@ -27,22 +27,10 @@ export type EditorI18nKey =
   | 'entity_add'
   | 'entity_delete'
   // entity editor schema titles
-  | 'entity_add_character'
-  | 'entity_delete_character'
-  | 'entity_delete_character_confirm'
   | 'entity_add_location'
   | 'entity_delete_location'
   | 'entity_delete_location_confirm'
-  | 'entity_add_voice'
-  | 'entity_delete_voice'
-  | 'entity_delete_voice_confirm'
-  | 'entity_add_behavior'
-  | 'entity_delete_behavior'
-  | 'entity_delete_behavior_confirm'
   // entity field labels
-  | 'field_appearance'
-  | 'field_clothes'
-  | 'field_video_tokens'
   | 'field_description'
   | 'field_time'
   | 'field_season'
@@ -50,9 +38,6 @@ export type EditorI18nKey =
   | 'field_weather'
   | 'field_mood'
   | 'field_atmosphere'
-  | 'field_timbre'
-  | 'field_manner'
-  | 'field_baseline'
   // form validation
   | 'entity_name_required'
   | 'entity_id_exists'
@@ -67,10 +52,6 @@ export type EditorI18nKey =
   | 'field_name'
   // delete confirm
   | 'entity_delete_btn'
-  // behavior dialog
-  | 'behavior_character'
-  | 'behavior_character_hint'
-  | 'behavior_character_required'
   // structure add dialog
   | 'field_chapter_title'
   | 'field_scene_title'

@@ -1,7 +1,7 @@
 {
   "name": "@animastor/web-editor",
-  "version": "0.2.0",
-  "description": "Schema-driven editor UI primitives for Animastor web frontend — entity add/delete dialogs, structure add dialog, canvas waveform renderer, and preview ID generator. Host capabilities (i18n, icons, modal) arrive via the injected EditorPorts contract; the package never imports host stores, api/client, or app-level UI directly.",
+  "version": "0.3.0",
+  "description": "Schema-driven editor UI primitives for Animastor web frontend — location add/delete dialogs, structure add dialog, canvas waveform renderer, and preview ID generator. Host capabilities (i18n, icons, modal) arrive via the injected EditorPorts contract; the package never imports host stores, api/client, or app-level UI directly.",
   "keywords": [
     "animastor",
     "editor",
