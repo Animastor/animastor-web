@@ -3390,3 +3390,15 @@ button { font: inherit; color: inherit; }
 .voice-refs__cand audio { max-width: 100%; }
 .voice-refs__transcript { color: var(--text-2); }
 .voice-refs__reftext { width: 100%; box-sizing: border-box; }
+
+/* VBook 4 step 5 — hero card on the step-4 contract (HERO_CARD.md §7, §10) */
+.hero-sheet__notice { margin: 0 0 0.5rem; padding: 0.5rem 0.75rem; border-radius: 8px; font-size: 0.875rem; color: var(--text-2); background: var(--surface-2, rgba(127, 127, 127, 0.1)); }
+.hero-sheet__evidence { color: var(--text-2); font-style: italic; }
+.hero-badge--outdated { color: var(--warning); background: var(--warning-container); }
+.hero-ref__state--failed { color: var(--error); }
+.hero-ref__state--pending { color: var(--text-2); }
+.edit-empty__hint { color: var(--text-2); font-size: 0.875rem; }
+.book-problems { display: flex; flex-direction: column; gap: 0.5rem; border-left: 3px solid var(--warning); }
+.book-problems__row { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.875rem; color: var(--warning); }
+.book-problems__scenes { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; }
+.book-problems__here { font-weight: 600; text-decoration: underline; }

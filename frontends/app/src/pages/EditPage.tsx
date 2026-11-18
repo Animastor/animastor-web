@@ -34,6 +34,8 @@ import { deleteJson, getJson, mediaUrl, patchJson, postJson, putJson } from '../
 import { HeroesPanel } from '../features/heroes/HeroesPanel';
 import { assignLook } from '../features/heroes/heroApi';
 import { BASE_LOOK, findLook, orderHeroes, resolveLook, unsupportedVbook } from '../features/heroes/heroModel';
+import { BookProblems, UnsupportedBook } from '../features/heroes/BookProblems';
+import { lookPatchFields } from '../features/heroes/sceneLooks';
 import type { UnsupportedVbook } from '../features/heroes/heroModel';
 import type {
   AppConfig, BookChapter, BookData, BookScene, BookUnit, CharPassport, SceneTiming, WaveformData,
@@ -141,14 +143,6 @@ function passportFieldLabel(key: string): string {
     case 'video_tokens': return t('field_video_tokens');
     default: return key;
   }
-}
-
-// Render a passport field value as editable text. video_tokens may be an array
-// of features (agent scheme) or a legacy string — String([...]) would join
-// WITHOUT a space ("a,b"), so arrays are joined explicitly with ", ".
-function passportFieldText(p: CharPassport | null | undefined, f: string): string {
-  const raw = p ? (p as CharPassport)[f as keyof CharPassport] : undefined;
-  return typeof raw === 'string' ? raw : Array.isArray(raw) ? raw.join(', ') : (raw ?? '');
 }
 
 // ── readField / readUnitField ports ──
@@ -1116,35 +1110,10 @@ export function EditPage(props: { path?: string }) {
     maybeAppendPassportBlock();
   }, [markDirty, maybeAppendPassportBlock]);
 
-  // buildPassportOverrideFields — diff vs the scene's existing overrides
-  const buildPassportOverrideFields = useCallback((sc: BookScene): Record<string, string> => {
-    const result: Record<string, string> = {};
-    const desired = new Map<string, Record<string, string>>();
-    overrideBlocks.forEach((block) => {
-      const charId = block.charId.trim();
-      if (charId === '' || !Object.values(block.fields).some((v) => v.trim() !== '')) return;
-      const m = desired.get(charId) ?? {};
-      PASSPORT_OVERRIDE_FIELDS.forEach((f) => {
-        const v = block.fields[f]?.trim() ?? '';
-        if (v) m[f] = v;
-      });
-      desired.set(charId, m);
-    });
-    const existing = sc.look_patch ?? {};
-    const allCharIds = new Set([...desired.keys(), ...Object.keys(existing)]);
-    allCharIds.forEach((charId) => {
-      const want = desired.get(charId);
-      const have = existing[charId];
-      PASSPORT_OVERRIDE_FIELDS.forEach((f) => {
-        const newVal = want?.[f] ?? '';
-        const oldVal = have ? passportFieldText(have as CharPassport, f) : '';
-        if (newVal !== oldVal) {
-          result[`look_patch.${charId}.${f}`] = newVal;
-        }
-      });
-    });
-    return result;
-  }, [overrideBlocks]);
+  // buildPassportOverrideFields — diff vs the scene's existing look_patch
+  // (VBook 4: look_patch.<hero>.<field>; passport.* is never sent).
+  const buildPassportOverrideFields = useCallback((sc: BookScene): Record<string, string> =>
+    lookPatchFields(overrideBlocks, sc.look_patch as Parameters<typeof lookPatchFields>[1]), [overrideBlocks]);
 
   // ── Save (saveToBackend) — resolves true only when the save succeeded, so
   //    desktop draft protection can continue navigation after a confirmed save
@@ -1725,6 +1694,11 @@ export function EditPage(props: { path?: string }) {
         </div>
       );
     }
+    // unknown_participant (owner 18.11): the book's problem list with links to its scenes
+    out.push(
+      <BookProblems key="book-problems" issues={bookData?.hero_issues} currentChapterId={chId} currentSceneId={scId}
+        sceneLabel={sceneLinkLabel} onOpenScene={(c, s) => goToSceneFromHero(c, s)} />
+    );
     out.push(sectionLabel(t('edit_section_scene_general')));
     out.push(readonlyField('scene_id', sc.scene_id ?? '—'));
     ['scene_title', 'type', 'style'].forEach((key) => {
@@ -1804,6 +1778,13 @@ export function EditPage(props: { path?: string }) {
   // «Where the look is in effect» → open that chapter / scene on the Scene tab
   // (sceneId null — the first scene of the chapter). The position observer
   // reloads the editor onto it, exactly like a tap in the Navigator.
+  const sceneLinkLabel = (chapterId: string, sceneId: string): string => {
+    const ch = chapters.find((c) => c.chapter_id === chapterId);
+    const sc = ch?.scenes?.find((s) => s.scene_id === sceneId);
+    const chName = ch?.chapter_title || chapterId;
+    return `${chName} · ${sc?.scene_title || sceneId}`;
+  };
+
   const goToSceneFromHero = (chapterId: string, sceneId: string | null): void => {
     const ch = chapters.find((c) => c.chapter_id === chapterId);
     const sc = sceneId ? ch?.scenes?.find((s) => s.scene_id === sceneId) : ch?.scenes?.[0];
@@ -2298,10 +2279,7 @@ export function EditPage(props: { path?: string }) {
 
       {/* Unsupported book format (VBook 3.1) — the editor has nothing to show */}
       {bid && !loading && unsupported && (
-        <div class="edit-empty edit-empty--unsupported" role="alert">
-          <strong>{t('vbook_unsupported_title')}</strong>
-          <span>{tf('vbook_unsupported_body', unsupported.version, unsupported.supported)}</span>
-        </div>
+        <UnsupportedBook info={unsupported} />
       )}
 
       {/* Full-size image zoom dialog (backdrop click / Escape / X closes) */}
