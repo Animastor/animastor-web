@@ -1,10 +1,13 @@
 import { useState, useCallback, useEffect } from 'preact/hooks';
+import { DEFAULT_REASONING, ReasoningSettings, reasoningBody, reasoningFromMeta } from '../features/ai/reasoning';
+import type { ReasoningValue } from '../features/ai/reasoning';
 import { applyTheme, applyLanguage, readPrefs, writePrefs } from '../app/theme';
 import type { ThemePref } from '../app/theme';
 import { t, tf } from '../app/i18n';
 import type { StrKey } from '../app/i18n';
 import { getJson, postJson, putJson, deleteJson, ApiError } from '../api/client';
 import { bookId, resetProgressState } from '../state/generateStore';
+import { authMe, isAdminUser } from '../state/authStore';
 import { closeBook as closeGenerateBook } from '../state/fileStore';
 import { closeBook as closePlayerBook, clearMediaCache } from '@animastor/web-player';
 import { Modal, toast } from '../lib/ui';
@@ -230,6 +233,8 @@ interface AiProviderMeta {
   connector_id?: string | null; // local-ai binding only (Local AI Connector V1)
   status: ProviderStatus;
   last_tested_at: number | null;
+  disable_thinking?: boolean;
+  reasoning_effort?: string | null;
 }
 interface AiProviderRead {
   provider: AiProviderMeta | null;
@@ -248,6 +253,7 @@ function AIProviderSection() {
   const [endpoint, setEndpoint] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('');
+  const [reasoning, setReasoning] = useState<ReasoningValue>(DEFAULT_REASONING);
   const [saved, setSaved] = useState<AiProviderMeta | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -276,6 +282,7 @@ function AIProviderSection() {
             setProviderType((meta.provider_type as ProviderType) || 'openai-compatible');
             setEndpoint(meta.endpoint || '');
             setModel(meta.model || '');
+            setReasoning(reasoningFromMeta(meta));
           }
         }
       } catch (e) {
@@ -304,6 +311,7 @@ function AIProviderSection() {
         provider_type: v.body.provider_type,
         endpoint: v.body.endpoint,
         model: v.body.model,
+        ...reasoningBody(reasoning),
       };
       if (v.body.api_key) body.api_key = v.body.api_key;
       const res = await putJson<{ provider: AiProviderMeta }>('/settings/ai/provider', body);
@@ -326,7 +334,7 @@ function AIProviderSection() {
       await deleteJson('/settings/ai/provider');
       setSaved(null);
       setProviderType('openai-compatible');
-      setEndpoint(''); setApiKey(''); setModel('');
+      setEndpoint(''); setApiKey(''); setModel(''); setReasoning(DEFAULT_REASONING);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -350,6 +358,8 @@ function AIProviderSection() {
       if (endpoint) body.endpoint = endpoint;
       if (apiKey.trim()) body.api_key = apiKey.trim();
       if (model) body.model = model;
+      // the test sends what the form shows — the same body the chat sends
+      Object.assign(body, reasoningBody(reasoning));
       const res = await postJson<AiProviderTest>('/settings/ai/test', body);
       const r = describeTestResult(res);
       if (r.kind === 'ok') {
@@ -469,6 +479,8 @@ function AIProviderSection() {
                 disabled={busy}
                 onInput={(e) => setModel((e.target as HTMLInputElement).value)}
               />
+
+              <ReasoningSettings value={reasoning} onChange={setReasoning} disabled={busy} />
 
               <div class="settings__actions">
                 <button class="btn btn--block" onClick={onSave} disabled={busy || !endpoint}>
@@ -821,8 +833,9 @@ function WorkerSection() {
   // Instant apply: the profile selection IS the save (global override).
   // PUT /connectors/profiles persists it; the backend honors it in prompt
   // assembly + skill injection. No Apply button.
+  const canEditProfile = isAdminUser(authMe.value.user);
   const saveProfile = async (profile: string) => {
-    if (saving) return;
+    if (saving || !canEditProfile) return;
     setSaving(true); setError('');
     try {
       await putJson('/connectors/profiles', { type, profile });
@@ -887,7 +900,7 @@ function WorkerSection() {
             class="select"
             value={displayProfile}
             aria-label={t(PROFILE_LABEL[type])}
-            disabled={saving}
+            disabled={saving || !canEditProfile}
             onChange={(e) => {
               const v = (e.target as HTMLSelectElement).value;
               setProfileName(v);
@@ -896,7 +909,9 @@ function WorkerSection() {
           >
             {profileOptions.map((o) => <option key={o} value={o}>{o}</option>)}
           </select>
-          <p class="card__hint">{t('settings_profiles_saved_and_applied')}</p>
+          {/* The profile is the ONE global override (PUT /connectors/profiles —
+              admin only since step 6): others see it read-only. */}
+          <p class="card__hint">{canEditProfile ? t('settings_profiles_saved_and_applied') : t('connector_profile_admin_only')}</p>
         </div>
 
         {/* ── Timeout ── */}

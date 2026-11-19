@@ -2,7 +2,9 @@ import { useEffect, useState } from 'preact/hooks';
 import { useSignal } from '@preact/signals';
 import { getJson, putJson, postJson } from '../api/client';
 import { Switch, ErrorText } from '../lib/ui';
-import { authMe, login, logout, fetchMe } from '../state/authStore';
+import { DEFAULT_REASONING, ReasoningSettings, reasoningBody, reasoningFromMeta } from '../features/ai/reasoning';
+import type { ReasoningValue } from '../features/ai/reasoning';
+import { authMe, login, logout, fetchMe, isAdminUser } from '../state/authStore';
 import {
   type ProviderType,
   type SystemAiState,
@@ -64,7 +66,7 @@ export function AdminPage(props: { path?: string }) {
 
   // Check admin role
   const user = me.value.user!;
-  const isAdmin = user.role === 'admin';
+  const isAdmin = isAdminUser(user);
   if (!isAdmin) {
     return (
       <section class="page page--centered">
@@ -151,6 +153,7 @@ function AdminDashboard(props: { onLogout: () => void }) {
   const [endpoint, setEndpoint] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('');
+  const [reasoning, setReasoning] = useState<ReasoningValue>(DEFAULT_REASONING);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -170,6 +173,7 @@ function AdminDashboard(props: { onLogout: () => void }) {
           setProviderType(meta.provider_type || 'openai-compatible');
           setEndpoint(meta.endpoint || '');
           setModel(meta.model || '');
+          setReasoning(reasoningFromMeta(meta));
         }
       } catch (e) {
         if (alive) setError((e as Error).message);
@@ -202,7 +206,7 @@ function AdminDashboard(props: { onLogout: () => void }) {
     if (!v.ok) { setError(v.error || 'Invalid input'); return; }
     setBusy(true); setError(''); setNotice('');
     try {
-      const res = await putJson<SystemAiState>('/admin/system-ai', { provider: v.body });
+      const res = await putJson<SystemAiState>('/admin/system-ai', { provider: { ...v.body, ...reasoningBody(reasoning) } });
       const meta = normalizeSystemMeta(res.provider);
       setSaved(meta);
       setApiKey('');
@@ -222,6 +226,7 @@ function AdminDashboard(props: { onLogout: () => void }) {
       if (endpoint) body.endpoint = endpoint;
       if (apiKey.trim()) body.api_key = apiKey.trim();
       if (model) body.model = model;
+      Object.assign(body, reasoningBody(reasoning));
       const res = await postJson<SystemAiTest>('/admin/system-ai/test', body);
       const r = describeTestResult(res);
       if (r.kind === 'ok') {
@@ -344,6 +349,8 @@ function AdminDashboard(props: { onLogout: () => void }) {
                 disabled={busy}
                 onInput={(e) => setModel((e.target as HTMLInputElement).value)}
               />
+
+              <ReasoningSettings value={reasoning} onChange={setReasoning} disabled={busy} />
 
               <div class="settings__group">
                 <button class="btn" onClick={onSave} disabled={busy || !endpoint}>

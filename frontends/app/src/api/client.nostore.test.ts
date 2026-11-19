@@ -18,6 +18,7 @@ const POLL_PATHS = [
   '/worker/counts',
   '/generate/commands/abc',
   '/generate',
+  '/book/ba_1/heroes/yura/voice/candidates',
 ];
 const CACHEABLE_PATHS = [
   '/book/ba_1',

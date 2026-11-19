@@ -3,6 +3,8 @@
 //  - retryWithBackoff (3 attempts, 1s→2s, cap 5s) like PlaybackViewModel.retryWithBackoff,
 //  - SSE client for generation progress (ProgressStream.kt equivalent),
 //  - streaming Blob download for audio/video/image.
+import { tf } from '../app/i18n';
+
 export const API_BASE = '/api/v1';
 const REQUEST_TIMEOUT_MS = 30_000; // OkHttp default read timeout
 // Long-running endpoints (POST /bootstrap, /bootstrap-next-window) block for the
@@ -27,6 +29,28 @@ function notifyLoginRequired(path: string, status: number): void {
   if (isLoginRequired(path, status) && loginRequiredHandler) {
     try { loginRequiredHandler(path); } catch { /* UI hook must never break a request */ }
   }
+}
+
+/**
+ * The human text of an error body. VBook 4 routes answer `{error: <code>,
+ * message: <text>}` (VBOOK_FORMAT_V4.md §12е, HERO_CARD.md §10 п.5) — the
+ * message is shown, the code is for branching. Older routes put the text in
+ * `error` alone. Pure — exported for tests.
+ */
+export function errorBodyMessage(body: unknown): string {
+  if (!body || typeof body !== 'object') return '';
+  const b = body as { error?: unknown; message?: unknown };
+  if (typeof b.message === 'string' && b.message.trim() !== '') return b.message;
+  return typeof b.error === 'string' ? b.error : '';
+}
+
+/** The machine code of an error body: `code`, else `error` when a `message` carries the text. */
+export function errorBodyCode(body: unknown): string | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const b = body as { code?: unknown; error?: unknown; message?: unknown };
+  if (typeof b.code === 'string') return b.code;
+  if (typeof b.error === 'string' && typeof b.message === 'string' && /^[a-z0-9_]+$/.test(b.error)) return b.error;
+  return undefined;
 }
 
 export class ApiError extends Error {
@@ -77,9 +101,14 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs: numbe
     if (!res.ok) {
       let msg = res.statusText;
       let body: unknown;
-      try { body = await res.json(); msg = (body as any)?.error || (body as any)?.message || msg; } catch { /* ignore */ }
+      try { body = await res.json(); msg = errorBodyMessage(body) || msg; } catch { /* ignore */ }
+      // VBook 3.1 book (open or import): every screen that prints e.message
+      // shows the same clear text instead of the machine code.
+      if ((body as any)?.error === 'unsupported_vbook_version') {
+        msg = tf('vbook_unsupported_body', String((body as any)?.vbook_version ?? '?'), Number((body as any)?.supported ?? 4));
+      }
       notifyLoginRequired(path, res.status);
-      throw new ApiError(msg, res.status, (body as any)?.code, body);
+      throw new ApiError(msg, res.status, errorBodyCode(body), body);
     }
     if (res.status === 204) return undefined as T;
     return (await res.json()) as T;
@@ -107,6 +136,9 @@ const NO_STORE_GET_PATHS: readonly RegExp[] = [
   /^\/worker\/counts(?:[/?]|$)/,
   // v2 generation API (/generate/*), present and future
   /^\/generate(?:[/?]|$)/,
+  // voice reference candidates of a hero (HERO_CARD.md §6) — polled every 3 s
+  // while a design / upload command runs
+  /^\/book\/[^/?]+\/heroes\/[^/?]+\/voice\/candidates(?:[/?]|$)/,
 ];
 
 /** `true` when a GET of `path` must bypass the browser HTTP cache (polls,
@@ -203,6 +235,11 @@ export async function getBlob(path: string, signal?: AbortSignal, onProgress?: (
   }
 }
 
+/** Raw body upload (e.g. an audio sample) — the server reads the bytes as sent. */
+export async function postRaw<T>(path: string, body: Blob, contentType: string, timeoutMs: number = 120_000): Promise<T> {
+  return request<T>(path, { method: 'POST', body, headers: { 'Content-Type': contentType } }, timeoutMs);
+}
+
 export async function postMultipart<T>(path: string, file: File | Blob, fieldName: string = 'file', filename: string = 'upload.vbook'): Promise<T> {
   const fd = new FormData();
   fd.append(fieldName, file, filename);
@@ -215,6 +252,12 @@ export async function postMultipart<T>(path: string, file: File | Blob, fieldNam
 // path is the endpoint-relative path WITH query string (e.g. build_id).
 export function mediaUrl(path: string): string {
   return API_BASE + path;
+}
+
+// Multipart POST with arbitrary form fields (hero reference uploads: the file
+// plus ref_text / kind). Same error contract as request().
+export async function postForm<T>(path: string, form: FormData): Promise<T> {
+  return request<T>(path, { method: 'POST', body: form }, BLOB_TIMEOUT_MS);
 }
 
 // retryWithBackoff — numeric backoff 1s→2s→… capped at 5s, 3 attempts total

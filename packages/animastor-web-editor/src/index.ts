@@ -24,5 +24,5 @@ export { ENTITY_SCHEMAS } from './entityEditor';
 export type { EntityKind, EntitySchema, EntityFieldDef, StructureKind, StructureParentOption } from './entityEditor';
 
 // Components (require EditorPorts injection)
-export { EntityAddButton, EntityDeleteButton, EntityEditorDialog, BehaviorAddDialog, DeleteConfirmDialog, StructureAddDialog } from './entityEditor';
+export { EntityAddButton, EntityDeleteButton, EntityEditorDialog, DeleteConfirmDialog, StructureAddDialog } from './entityEditor';
 export { Waveform } from './waveform';

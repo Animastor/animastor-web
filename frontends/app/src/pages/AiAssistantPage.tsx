@@ -1,4 +1,5 @@
 import type { JSX } from 'preact';
+import { isReasoningBudgetError, reasoningBudgetProvider, reasoningBudgetText } from '../features/ai/reasoning';
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { getJson, postJson, deleteJson, postChatStream, mediaUrl, ApiError } from '../api/client';
 import type { AiChatResponse, AiMessage, ChatSessionApi, SessionMessageApi, BookData, BookChapter, BookScene } from '../api/models';
@@ -289,7 +290,9 @@ export function AiAssistantPage(props: { path?: string; embedded?: boolean; onCl
     // everything else shows the sanitized backend message.
     const showFailure = (code: string | undefined, message: string) => {
       const known = streamErrorKey(code);
-      const msg = known ? t(known as StrKey) : tf('ai_error', message || 'stream failed');
+      const msg = known ? t(known as StrKey)
+        : isReasoningBudgetError(code ?? '') || isReasoningBudgetError(message) ? reasoningBudgetText(reasoningBudgetProvider(message))
+          : tf('ai_error', message || 'stream failed');
       if (assistantId != null) {
         // Mid-stream failure: the partial answer stays visible, the error
         // note is appended below it (nothing is lost, nothing hangs).

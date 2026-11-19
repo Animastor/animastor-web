@@ -24,3 +24,10 @@ describe('classifyStartError (Stage 155 /regenerate 409 layer_disabled)', () => 
     expect(layerLabels(['audio', 'image'], label)).toBe('Аудио», «Изображения');
   });
 });
+
+describe('classifyStartError — voice references (VOICE_REFERENCES.md)', () => {
+  it('409 voice_reference_required → its own kind with the character ids', () => {
+    const e = { status: 409, message: 'x', body: { code: 'voice_reference_required', character_ids: ['narrator', 'anna', 3] } };
+    expect(classifyStartError(e, ['audio'])).toEqual({ kind: 'voice_reference_required', characterIds: ['narrator', 'anna'] });
+  });
+});

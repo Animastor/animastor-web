@@ -24,6 +24,8 @@ export interface SystemProviderMeta {
   last_tested_at: number | null;
   created_at: number;
   updated_at: number;
+  disable_thinking: boolean;
+  reasoning_effort: string | null;
 }
 
 /** Shape returned by GET /api/v1/admin/system-ai. */
@@ -59,6 +61,8 @@ export function normalizeSystemMeta(raw: unknown): SystemProviderMeta | null {
     last_tested_at: r.last_tested_at == null ? null : Number(r.last_tested_at),
     created_at: Number(r.created_at || 0),
     updated_at: Number(r.updated_at || 0),
+    disable_thinking: r.disable_thinking === true,
+    reasoning_effort: typeof r.reasoning_effort === 'string' ? r.reasoning_effort : null,
   };
 }
 

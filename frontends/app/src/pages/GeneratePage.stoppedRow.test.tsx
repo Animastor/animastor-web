@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render } from '@testing-library/preact';
 
 vi.mock('../api/client', () => ({
+  // authStore (via the reasoning notice) registers the 401 handler at import
+  setLoginRequiredHandler: vi.fn(),
   POLL_REQUEST_TIMEOUT_MS: 10_000,
   API_BASE: 'http://test',
   getJson: vi.fn(async () => ({})),
