@@ -6,13 +6,10 @@ import type { ThemePref } from '../app/theme';
 import { t, tf } from '../app/i18n';
 import type { StrKey } from '../app/i18n';
 import { getJson, postJson, putJson, deleteJson, ApiError } from '../api/client';
-import { bookId, resetProgressState } from '../state/generateStore';
+import { bookId } from '../state/generateStore';
 import { authMe, isAdminUser } from '../state/authStore';
-import { closeBook as closeGenerateBook } from '../state/fileStore';
-import { closeBook as closePlayerBook, clearMediaCache } from '@animastor/web-player';
-import { Modal, toast } from '../lib/ui';
 import { workerType } from '../app/routeState';
-import { navigate } from '../app/router';
+import { navigate, openMyBooks } from '../app/router';
 import type { Route } from '../app/router';
 import { PrivateWorkersSection } from '@animastor/web-workers';
 import { workerPorts } from '../app/workerAdapters';
@@ -43,7 +40,7 @@ export function SettingsPage(props: { section?: string; path?: string }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// /settings — General (theme + language + server + clear/delete + debug)
+// /settings — General (theme + language + server + «Мои книги» + debug)
 // 1:1 with SettingsFragment + fragment_settings.xml (stage 1).
 // ─────────────────────────────────────────────────────────────
 
@@ -52,8 +49,6 @@ function GeneralSection() {
   const [theme, setTheme] = useState<ThemePref>(prefs.theme ?? 'auto');
   const [language, setLanguage] = useState<'auto' | 'ru' | 'en'>(prefs.language ?? 'auto');
   const [, setLanguageTick] = useState(0);
-  const [confirm, setConfirm] = useState<null | { kind: 'clear' | 'delete'; message: string }>(null);
-  const [busy, setBusy] = useState(false);
 
   const onTheme = useCallback((v: ThemePref) => {
     setTheme(v); writePrefs({ theme: v }); applyTheme(v);
@@ -69,56 +64,6 @@ function GeneralSection() {
   // not editable because the web app cannot switch servers per-install.
   const serverUrl = typeof location !== 'undefined' ? location.origin : '';
   const debugText = `App: Animastor Web 0.1.0\nServer: ${serverUrl}`;
-
-  // clearCacheButton — Android: no book → Repository.clearCache() + toast;
-  // book open → confirm dialog → clearBookCache + clearCache + player reset
-  // + resetProgressState (book structure stays intact, Navigator keeps it).
-  const onClearCache = () => {
-    if (!bookId.value) {
-      void clearMediaCache()
-        .then((n) => toast(tf('settings_cache_cleared_local', n)))
-        .catch((e) => toast(tf('ai_error', (e as Error).message), 4000));
-      return;
-    }
-    setConfirm({ kind: 'clear', message: t('settings_cache_clear_confirm') });
-  };
-
-  // deleteVbookButton — Android: no book → toast "No book open"; book open →
-  // confirm dialog → deleteBook + clearCache + close both ViewModels.
-  const onDeleteVbook = () => {
-    if (!bookId.value) {
-      toast(t('settings_no_book_open'));
-      return;
-    }
-    setConfirm({ kind: 'delete', message: t('settings_delete_vbook_confirm') });
-  };
-
-  const runConfirm = async () => {
-    if (!confirm || busy) return;
-    const currentBook = bookId.value;
-    if (!currentBook) { setConfirm(null); return; } // book closed while dialog up
-    setBusy(true);
-    try {
-      if (confirm.kind === 'clear') {
-        // DELETE /book/:id/cache — generated assets only; structure preserved.
-        await deleteJson(`/book/${encodeURIComponent(currentBook)}/cache`);
-        await clearMediaCache();
-        closePlayerBook();       // playbackViewModel.closeBook()
-        resetProgressState();    // viewModel.resetProgressState()
-        toast(t('settings_cache_cleared'));
-      } else {
-        await deleteJson(`/book/${encodeURIComponent(currentBook)}`);
-        await clearMediaCache();
-        closeGenerateBook();     // resets generate + playback (closeBook both)
-        toast(t('settings_delete_vbook_done'));
-      }
-    } catch (e) {
-      toast(tf('ai_error', (e as Error).message), 4000);
-    } finally {
-      setBusy(false);
-      setConfirm(null);
-    }
-  };
 
   return (
     <section class="page settings-page">
@@ -160,16 +105,13 @@ function GeneralSection() {
           <NavRow label={t('worker_settings_title')} onClick={() => navigate('/settings/worker')} />
         </div>
 
-        {/* Cache / Storyboard — settings_cache + clearCacheButton + deleteVbookButton
-            (Widget.Animastor.Button.Outlined.Error, 42dp, match_parent). */}
-        <div class="settings__group settings__group--stack">
-          <span class="settings__label">{t('settings_cache')}</span>
-          <button class="btn btn--outlined btn--error" onClick={onClearCache} disabled={busy}>
-            {t('settings_cache_clear')}
-          </button>
-          <button class="btn btn--outlined btn--error" onClick={onDeleteVbook} disabled={busy}>
-            {t('settings_delete_vbook')}
-          </button>
+        {/* «Мои книги» (2026-11-22) — replaces the «Очистить» block («Удалить vBook /
+            Сториборд с сервера» acted on the OPEN book, which the screen did not show).
+            Deleting a book or its generated content now lives in the Library list,
+            per book, with the book's title in the confirmation. Not a second screen:
+            the Library on its «Мои книги» tab (router.openMyBooks). */}
+        <div class="settings__group">
+          <NavRow label={t('my_books')} onClick={openMyBooks} testId="settings-my-books" />
         </div>
 
         {/* Debug — settings_debug + debugInfo (11sp onSurfaceVariant) */}
@@ -182,30 +124,13 @@ function GeneralSection() {
       {/* Instant apply (web parity): theme/language already apply live on
           selection — no Apply button. Back navigates out. */}
 
-      {/* AlertDialog — DialogDeleteVbookBinding (title + message + OK/Cancel) */}
-      {confirm && (
-        <Modal
-          title={confirm.kind === 'clear' ? t('settings_cache_clear') : t('settings_delete_vbook')}
-          onClose={() => { if (!busy) setConfirm(null); }}
-        >
-          <p class="modal__notice">{confirm.message}</p>
-          <div class="modal__footer">
-            <button class="btn btn--outlined" onClick={() => { if (!busy) setConfirm(null); }} disabled={busy}>
-              {t('dialog_cancel')}
-            </button>
-            <button class="btn" onClick={runConfirm} disabled={busy}>
-              {busy ? t('play_loading') : t('dialog_ok')}
-            </button>
-          </div>
-        </Modal>
-      )}
     </section>
   );
 }
 
-function NavRow({ label, onClick }: { label: string; onClick: () => void }) {
+function NavRow({ label, onClick, testId }: { label: string; onClick: () => void; testId?: string }) {
   return (
-    <button class="settings__nav-row" onClick={onClick}>
+    <button class="settings__nav-row" onClick={onClick} data-testid={testId}>
       <span>{label}</span>
       <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M9 6l6 6-6 6" /></svg>
     </button>

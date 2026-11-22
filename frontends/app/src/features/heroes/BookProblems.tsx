@@ -9,13 +9,16 @@ import type { JSX } from 'preact';
 import { t, tf } from '../../app/i18n';
 import { unknownParticipants } from './heroModel';
 import type { UnsupportedVbook } from './heroModel';
+import { UnsupportedBookActions } from '../myBooks/UnsupportedBookPanel';
 
-export function UnsupportedBook({ info }: { info: UnsupportedVbook }): JSX.Element {
+export function UnsupportedBook({ info, bookId }: { info: UnsupportedVbook; bookId?: string }): JSX.Element {
   return (
     <div class="edit-empty edit-empty--unsupported" role="alert" data-testid="vbook-unsupported">
       <strong>{t('vbook_unsupported_title')}</strong>
       <span>{tf('vbook_unsupported_body', info.version, info.supported)}</span>
       <span class="edit-empty__hint">{t('vbook_unsupported_action')}</span>
+      {/* «Мои книги»: the one action left — the same confirmation as the list */}
+      {bookId && <UnsupportedBookActions info={{ bookId, version: info.version, supported: info.supported }} />}
     </div>
   );
 }

@@ -82,7 +82,9 @@ const PLAYER_HOST_CONSUMERS_ALLOWED = [
   'app/fileAdapters.ts',       // player release seam (closeBook)
   'app/navigatorAdapters.ts',  // seek port (seekToPosition)
   'pages/EditPage.tsx',        // external seek + delete-invalidations
-  'pages/SettingsPage.tsx',    // closeBook + clearMediaCache
+  // «Мои книги» (2026-11-22): the Settings «Очистить» block moved into the
+  // per-book actions of the Library list — the same two calls, new owner.
+  'features/myBooks/myBooksStore.ts', // closeBook + clearMediaCache (open book deleted / cleared)
   PLAYER_ADAPTERS,             // PlayerPorts type import (composition seam)
 ];
 

@@ -57,6 +57,7 @@ import type { SceneRef } from '../api/models';
 import { navigateTo, clearPosition } from './positionStore';
 import { resolveLanguage } from '../app/theme';
 import { readPersistedBookSession } from '@animastor/web-book-session';
+import { markBookOpened } from '../features/myBooks/myBooksApi';
 
 /** File-local structural mirror of the shared phase union (host adapter
  *  bridges it to generateStore's `phase` signal — NOT a separate value). */
@@ -79,6 +80,31 @@ export const errorMessage = signal<string | null>(null);
 export const isExporting = signal(false);
 export const exportProgress = signal(0);
 export const navigationEvent = signal<FileNavigationEvent>(null);
+
+/**
+ * A book of an unsupported format (VBook 3.1, VBOOK_FORMAT_V4 §9) the user
+ * tried to open: GET /book answered 409 unsupported_vbook_version. The File
+ * screen shows it with the one action left — «Удалить книгу» (host panel
+ * UnsupportedBookPanel, next to FilePage). Cleared by the next open/close.
+ */
+export interface UnsupportedOpen {
+  bookId: string;
+  version: string;
+  supported: number;
+}
+export const unsupportedBook = signal<UnsupportedOpen | null>(null);
+
+/** The typed 409 of GET /book for a VBook 3.1 book, or null. */
+export function unsupportedOpenOf(bookId: string, err: unknown): UnsupportedOpen | null {
+  const body = (err as { body?: unknown } | null)?.body as Record<string, unknown> | null | undefined;
+  if (!body || typeof body !== 'object' || body.error !== 'unsupported_vbook_version') return null;
+  const v = body.vbook_version;
+  return {
+    bookId,
+    version: typeof v === 'string' || typeof v === 'number' ? String(v) : '?',
+    supported: typeof body.supported === 'number' ? body.supported : 4,
+  };
+}
 
 export function setExporting(v: boolean): void {
   isExporting.value = v;
@@ -181,6 +207,7 @@ function beginBookTransition(): void {
   errorMessage.value = null;
   importMessages.value = [];
   navigationEvent.value = null;
+  unsupportedBook.value = null;
 }
 
 export async function importBookFromFile(file: File): Promise<void> {
@@ -190,6 +217,7 @@ export async function importBookFromFile(file: File): Promise<void> {
     const res = await postMultipart<ImportResponse>('/book/import', file, 'file', file.name);
     const bId = res.book_id;
     session.loadBook(bId, res.build_id ?? '');
+    markBookOpened(bId);
     const bookData = await getJson<BookData>(`/book/${encodeURIComponent(bId)}`).catch(() => null);
     const scenes = bookData ? sceneRefs(bookData) : [];
     const first = scenes.find((s) => s.sceneType === 'cover') ?? scenes[0] ?? null;
@@ -261,7 +289,8 @@ export async function restoreBookSession(): Promise<boolean> {
   if (!id) {
     try {
       const res = await getJson<RecentBooksResponse>('/books');
-      const first = res.books?.[0];
+      // A VBook 3.1 book cannot be opened — never restore into it.
+      const first = res.books?.find((b) => !b.unsupported);
       if (first?.book_id) { id = first.book_id; bld = first.build_id ?? ''; }
     } catch { /* offline — nothing to restore */ }
   }
@@ -302,6 +331,7 @@ export async function openBookById(param: string): Promise<void> {
     const bookData = await getJson<BookData>(`/book/${encodeURIComponent(id)}`);
     const bId = bookData.manifest?.book_id || id;
     session.loadBook(bId, bookData.manifest?.build_id || '');
+    markBookOpened(bId);
     const scenes = sceneRefs(bookData);
     const first = scenes.find((s) => s.sceneType === 'cover') ?? scenes[0] ?? null;
     navigateTo({ chapterId: first?.chapterId ?? null, sceneId: first?.sceneId ?? null, unitIndex: 0 });
@@ -311,6 +341,12 @@ export async function openBookById(param: string): Promise<void> {
     navigationEvent.value = scenes.length && assets?.has_assets ? 'play' : 'generate';
   } catch (e) {
     session.phase.value = 'IDLE';
+    // VBook 3.1: a final state with one action (UnsupportedBookPanel), not an error text.
+    const legacy = unsupportedOpenOf(id, e);
+    if (legacy) {
+      unsupportedBook.value = legacy;
+      return;
+    }
     errorMessage.value = (e as Error).message || 'Book not found';
   }
 }
@@ -329,6 +365,7 @@ export function closeBook(): void {
   errorMessage.value = null;
   importMessages.value = [];
   navigationEvent.value = null;
+  unsupportedBook.value = null;
   session.dirtySummary.value = null;
   generationReset.clearVBookProgress();
   clearPosition();
@@ -351,6 +388,7 @@ export async function createBlankBook(): Promise<string | null> {
     const res = await postJson<{ book_id: string }>('/book/blank', { language: resolveLanguage() });
     const bId = res.book_id;
     session.loadBook(bId, '');
+    markBookOpened(bId);
     const bookData = await getJson<BookData>(`/book/${encodeURIComponent(bId)}`);
     const scenes = sceneRefs(bookData);
     const first = scenes.find((s) => s.sceneType === 'cover') ?? scenes[0] ?? null;

@@ -2279,7 +2279,7 @@ export function EditPage(props: { path?: string }) {
 
       {/* Unsupported book format (VBook 3.1) — the editor has nothing to show */}
       {bid && !loading && unsupported && (
-        <UnsupportedBook info={unsupported} />
+        <UnsupportedBook info={unsupported} bookId={bid} />
       )}
 
       {/* Full-size image zoom dialog (backdrop click / Escape / X closes) */}
