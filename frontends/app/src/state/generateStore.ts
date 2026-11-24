@@ -651,6 +651,36 @@ function isUserAction(a: unknown): a is UserAction {
   return !!v && v.kind === 'user_click' && typeof v.source === 'string' && typeof v.actionId === 'string';
 }
 
+/** What startGeneration armed before the POST /regenerate. */
+interface ArmedStart {
+  /** The click started the timer (no generation was being timed). */
+  startedTimer: boolean;
+  /** The timer as it was before the click (restored on a refusal). */
+  timerBefore: GenerationTimerState;
+  /** A generation session was already running (its progress stream stays). */
+  hadSession: boolean;
+}
+
+/**
+ * The server refused the command up front — 409 layer_disabled, 422
+ * book_has_no_text, 409/422 voice_reference_required: no task was created,
+ * nothing runs. Undo everything the click armed before the POST: the session
+ * flags, the timer it started (back to its previous value — a stop would show
+ * a fresh 0:00 "final" time) and the progress stream it opened (kept when a
+ * generation was already running). The generic error path does NOT use this:
+ * a transport error / 429 does not prove that nothing runs.
+ */
+function settleRefusedStart(armed: ArmedStart): void {
+  isRegenerating.value = false;
+  progressTracking.newGenerationPending = false;
+  setGenerationStatus('IDLE');
+  if (armed.startedTimer) {
+    generationTimer.startedAt = armed.timerBefore.startedAt;
+    generationTimer.finalElapsedSeconds = armed.timerBefore.finalElapsedSeconds;
+  }
+  if (!armed.hadSession) stopProgressStream();
+}
+
 export async function startGeneration(req: GenerationRequest, action: UserAction): Promise<GenerationResult> {
   const bId = bookId.value;
   if (!bId) return { ok: false, message: 'No book' };
@@ -660,9 +690,14 @@ export async function startGeneration(req: GenerationRequest, action: UserAction
     return { ok: false, code: 'no_user_action', message: 'no_user_action' };
   }
   setGenerationStatus('RUNNING');
+  const armed: ArmedStart = {
+    startedTimer: generationTimer.startedAt <= 0,
+    timerBefore: { ...generationTimer },
+    hadSession: isRegenerating.value,
+  };
   isRegenerating.value = true;
   progressTracking.newGenerationPending = true;
-  if (generationTimer.startedAt <= 0) startTimer();
+  if (armed.startedTimer) startTimer();
   startProgressStream(bId);
   try {
     const res = await postJson<RegenerateResponse>(`/book/${encodeURIComponent(bId)}/regenerate`, {
@@ -690,9 +725,7 @@ export async function startGeneration(req: GenerationRequest, action: UserAction
     // left "regenerating"; the user gets an explicit "turn the layer on".
     const err = classifyStartError(e, req.workerTypes);
     if (err.kind === 'layer_disabled') {
-      isRegenerating.value = false;
-      progressTracking.newGenerationPending = false;
-      setGenerationStatus('IDLE');
+      settleRefusedStart(armed);
       const labels = layerLabels(err.workerTypes, (type) =>
         type === 'audio' ? t('progress_label_audio') : type === 'image' ? t('progress_label_image')
           : type === 'video' ? t('progress_label_video') : type);
@@ -703,15 +736,11 @@ export async function startGeneration(req: GenerationRequest, action: UserAction
     // from the server message; nothing runs, so the session is not left
     // "regenerating".
     if (err.kind === 'book_has_no_text') {
-      isRegenerating.value = false;
-      progressTracking.newGenerationPending = false;
-      setGenerationStatus('IDLE');
+      settleRefusedStart(armed);
       return { ok: false, code: 'book_has_no_text', message: t('generate_book_has_no_text') };
     }
     if (err.kind === 'voice_reference_required') {
-      isRegenerating.value = false;
-      progressTracking.newGenerationPending = false;
-      setGenerationStatus('IDLE');
+      settleRefusedStart(armed);
       return { ok: false, code: 'voice_reference_required', message: tf('voice_ref_required', err.characterIds.join(', ')) };
     }
     setGenerationStatus('ERROR');
