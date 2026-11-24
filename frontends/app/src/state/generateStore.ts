@@ -614,7 +614,7 @@ export interface GenerationRequest {
 }
 export type GenerationResult =
   | { ok: true; dirty: number; scope: string }
-  | { ok: false; message: string; code?: 'layer_disabled' | 'no_user_action' | 'voice_reference_required' };
+  | { ok: false; message: string; code?: 'layer_disabled' | 'no_user_action' | 'voice_reference_required' | 'book_has_no_text' };
 
 // ── Explicit user action (reports/2026-11-04/regenerate-sweep-fix.md) ──
 // A GPU command (/regenerate) is sent ONLY from a click handler: the caller
@@ -697,6 +697,16 @@ export async function startGeneration(req: GenerationRequest, action: UserAction
         type === 'audio' ? t('progress_label_audio') : type === 'image' ? t('progress_label_image')
           : type === 'video' ? t('progress_label_video') : type);
       return { ok: false, code: 'layer_disabled', message: tf('generate_layer_disabled', labels) };
+    }
+    // 2026-11-24: 422 book_has_no_text — the server refuses the command up
+    // front (nothing to generate). The text is localized by code, not taken
+    // from the server message; nothing runs, so the session is not left
+    // "regenerating".
+    if (err.kind === 'book_has_no_text') {
+      isRegenerating.value = false;
+      progressTracking.newGenerationPending = false;
+      setGenerationStatus('IDLE');
+      return { ok: false, code: 'book_has_no_text', message: t('generate_book_has_no_text') };
     }
     if (err.kind === 'voice_reference_required') {
       isRegenerating.value = false;

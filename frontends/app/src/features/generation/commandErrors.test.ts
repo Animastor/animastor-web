@@ -25,6 +25,31 @@ describe('classifyStartError (Stage 155 /regenerate 409 layer_disabled)', () => 
   });
 });
 
+// 2026-11-24: a blank book is refused up front with 422 book_has_no_text —
+// the UI shows its own localized text, not the English server message.
+describe('classifyStartError — 422 book_has_no_text', () => {
+  it('422 book_has_no_text → its own kind', () => {
+    const e = {
+      status: 422,
+      message: 'The book has no text yet — add text to its scenes, then start the generation.',
+      body: {
+        error: 'book_has_no_text',
+        code: 'book_has_no_text',
+        message: 'The book has no text yet — add text to its scenes, then start the generation.',
+      },
+    };
+    expect(classifyStartError(e, ['audio'])).toEqual({ kind: 'book_has_no_text' });
+  });
+  it('422 with the code only in `error` (older shape) is still recognised', () => {
+    const e = { status: 422, body: { error: 'book_has_no_text' } };
+    expect(classifyStartError(e, ['image'])).toEqual({ kind: 'book_has_no_text' });
+  });
+  it('unknown 422 → server message, generic path', () => {
+    const e = { status: 422, message: 'Some text from the server', body: { code: 'other_code', message: 'Some text from the server' } };
+    expect(classifyStartError(e, ['audio'])).toEqual({ kind: 'other', message: 'Some text from the server' });
+  });
+});
+
 describe('classifyStartError — voice references (VOICE_REFERENCES.md)', () => {
   it('409 voice_reference_required → its own kind with the character ids', () => {
     const e = { status: 409, message: 'x', body: { code: 'voice_reference_required', character_ids: ['narrator', 'anna', 3] } };
