@@ -495,7 +495,7 @@ export function GeneratePage(props: { path?: string }) {
                   userAction('generator.scope_dialog', ev),
                 );
                 if (res.ok) toast(tf('generate_started_layer', t(scopeFor === 'audio' ? 'progress_label_audio' : scopeFor === 'image' ? 'progress_label_image' : 'progress_label_video')));
-                else toast(res.code === 'layer_disabled' ? res.message : tf('generate_start_failed', res.message));
+                else toast(res.code === 'layer_disabled' || res.code === 'book_has_no_text' ? res.message : tf('generate_start_failed', res.message));
               })();
             }
           }}
@@ -761,7 +761,7 @@ async function onRetry(row: TaskRow, ev: Event): Promise<void> {
   if (!res) return;
   const typeLabel = t(row.type === 'audio' ? 'progress_label_audio' : row.type === 'video' ? 'progress_label_video' : 'progress_label_image');
   if (res.ok) toast(tf('generate_started_layer', typeLabel));
-  else toast(res.code === 'layer_disabled' ? res.message : tf('generate_start_failed', res.message));
+  else toast(res.code === 'layer_disabled' || res.code === 'book_has_no_text' ? res.message : tf('generate_start_failed', res.message));
 }
 
 // showSingleDoneRow — one green Done row across all section containers.

@@ -7,6 +7,12 @@
 //  of a silent failure. Any other 409 (e.g. "Regeneration already in
 //  progress") keeps the existing generic handling. Pure — mirrors Android
 //  GenerationCommandErrors (TaskStatusHelpers.kt).
+//
+//  2026-11-24: 422 { code: 'book_has_no_text', message } — a book whose
+//  scenes carry no material for the requested layers (blank book) is refused
+//  up front instead of a task that fails on its own. The text is taken from
+//  i18n by code (`generate_book_has_no_text`), never the server message;
+//  unknown codes keep the server message.
 // ═══════════════════════════════════════════════════════════════
 
 export type StartErrorKind =
@@ -14,6 +20,8 @@ export type StartErrorKind =
   // VOICE_REFERENCES.md: 409 { code: 'voice_reference_required', character_ids } —
   // no work was created; the user creates / locks the voice references first
   | { kind: 'voice_reference_required'; characterIds: string[] }
+  // 422 { error/code: 'book_has_no_text', message } — nothing to generate
+  | { kind: 'book_has_no_text' }
   | { kind: 'other'; message: string };
 
 interface ErrorLike { status?: number; message?: string; body?: unknown }
@@ -26,6 +34,9 @@ export function classifyStartError(e: unknown, requested: string[]): StartErrorK
   if (err.status === 409 && body && body.code === 'voice_reference_required') {
     const ids = Array.isArray(body.character_ids) ? body.character_ids.filter((x): x is string => typeof x === 'string') : [];
     return { kind: 'voice_reference_required', characterIds: ids };
+  }
+  if (err.status === 422 && body && (body.code === 'book_has_no_text' || body.error === 'book_has_no_text')) {
+    return { kind: 'book_has_no_text' };
   }
   if (err.status === 409 && body && body.error === 'layer_disabled') {
     const listed = Array.isArray(body.disabled_worker_types)
