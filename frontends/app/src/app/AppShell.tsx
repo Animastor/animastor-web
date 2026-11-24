@@ -11,6 +11,7 @@ import { FilePage } from '@animastor/web-file';
 import { NavigatePage } from '@animastor/web-navigator';
 import { AiAssistantPage } from '../pages/AiAssistantPage';
 import { UserMenu } from '../features/auth/UserMenu';
+import { UnsupportedBookPanel } from '../features/myBooks/UnsupportedBookPanel';
 import { bookId as openBookId, phase as playerPhase, blankBookJustCreated } from '../state/generateStore';
 import { getJson } from '../api/client';
 import type { BookData } from '../api/models';
@@ -81,6 +82,8 @@ export function AppShell({ children }: { children: JSX.Element }) {
     <div class="app-shell">
       <Toolbar path={path} isSecondary={isSecondary} />
       <div class="app-content">
+        {/* VBook 3.1 state of the File tab (host panel; the web-file package is untouched) */}
+        {path === '/file' && <UnsupportedBookPanel />}
         {isSecondary ? <div class="secondary">{children}</div> : children}
       </div>
       {!isSecondary && <TabBar path={path} />}
@@ -235,6 +238,7 @@ function DesktopWorkspace({ path, isSecondary, children }: { path: string; isSec
               {filePanelCollapsed ? <IconChevronRight width={18} height={18} /> : <IconChevronLeft width={18} height={18} />}
             </button>
           </div>
+          <UnsupportedBookPanel />
           <FilePage ports={filePorts} />
         </aside>
         <main class="desktop-main">

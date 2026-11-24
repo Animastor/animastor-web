@@ -680,9 +680,21 @@ export interface RecentBook {
   state?: string | null;
   source_type?: string | null;
   file_hash?: string | null;
-  updated_at?: number;
+  /** Source shape: ISO string (manifest) or epoch seconds (PG) — use updated_at_ms. */
+  updated_at?: number | string;
   parsed_chapters?: number;
   total_scenes?: number;
+  // «Мои книги» (2026-11-22)
+  /** Book format: 4 (or "4.x") — current; "3.1"/null with unsupported — legacy. */
+  vbook_version?: number | string | null;
+  /** true — a book of an unsupported format (VBook 3.1): only deletion is allowed. */
+  unsupported?: boolean;
+  /** updated_at normalized to epoch ms. */
+  updated_at_ms?: number | null;
+  /** When the owner last opened the book (POST /book/:id/opened), epoch ms. */
+  last_opened_at?: number | null;
+  /** Anything DELETE /book/:id/cache would remove; null — unknown. */
+  has_generated_content?: boolean | null;
 }
 
 export interface RecentBooksResponse {

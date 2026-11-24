@@ -523,3 +523,58 @@ describe('cancel regression — generation cancel never touches file error state
     expect(fileStore.errorMessage.value).toBe('stale-but-unreachable-for-cancel'); // file error untouched
   });
 });
+
+// ═══════════════ «Мои книги» (2026-11-22) ═══════════════
+
+describe('«Мои книги»: «книга открыта» + VBook 3.1', () => {
+  it('open / import / create record «книга открыта» on the server (POST /book/:id/opened)', async () => {
+    getJson.mockImplementation((path) =>
+      path === '/book/b1' ? Promise.resolve(COVER_BOOK) : Promise.resolve({ has_assets: false } as never)
+    );
+    await fileStore.openBookById('b1');
+    expect(postJson).toHaveBeenCalledWith('/book/b1/opened');
+
+    postJson.mockClear();
+    postMultipart.mockResolvedValue({ book_id: 'b1', build_id: 'bd1', format: 'vbook' });
+    await fileStore.importBookFromFile(new File(['x'], 'book.vbook'));
+    expect(postJson).toHaveBeenCalledWith('/book/b1/opened');
+
+    postJson.mockClear();
+    postJson.mockImplementation(async (path: string) => (path === '/book/blank' ? { book_id: 'b9' } : {}) as never);
+    getJson.mockImplementation((path) => (path === '/book/b9' ? Promise.resolve(COVER_BOOK) : Promise.reject(new Error('x'))));
+    await fileStore.createBlankBook();
+    expect(postJson).toHaveBeenCalledWith('/book/b9/opened');
+  });
+
+  it('a failed open records nothing', async () => {
+    getJson.mockRejectedValue(new Error('Book not found'));
+    await fileStore.openBookById('nope');
+    expect(postJson).not.toHaveBeenCalledWith('/book/nope/opened');
+  });
+
+  it('opening a VBook 3.1 book: the 3.1 state (unsupportedBook), not an error text', async () => {
+    getJson.mockRejectedValue(Object.assign(new Error('409'), {
+      status: 409, body: { error: 'unsupported_vbook_version', vbook_version: '3.1', supported: 4 },
+    }));
+    await fileStore.openBookById('legacy_1');
+    expect(fileStore.unsupportedBook.value).toEqual({ bookId: 'legacy_1', version: '3.1', supported: 4 });
+    expect(fileStore.errorMessage.value).toBeNull();
+    expect(postJson).not.toHaveBeenCalledWith('/book/legacy_1/opened');
+    // the next open / close clears it
+    fileStore.closeBook();
+    expect(fileStore.unsupportedBook.value).toBeNull();
+  });
+
+  it('restore never lands on a 3.1 book: the first SUPPORTED book of the list', async () => {
+    getJson.mockImplementation((path) => {
+      if (path === '/books') return Promise.resolve({ books: [
+        { book_id: 'legacy_1', unsupported: true, vbook_version: '3.1' },
+        { book_id: 'b1', build_id: 'bd1', vbook_version: 4 },
+      ] } as never);
+      if (path === '/book/b1') return Promise.resolve(COVER_BOOK);
+      return Promise.reject(new Error('404 ' + path));
+    });
+    expect(await fileStore.restoreBookSession()).toBe(true);
+    expect(generateStore.bookId.value).toBe('b1');
+  });
+});

@@ -1,12 +1,13 @@
 // Account & Workspace MVP — user menu + login/register dialog.
 // Concept (§19-21 of ACCOUNT_WORKSPACE_CONCEPT): a user/workspace control in
 // the top-right, separate from Settings. Anonymous → "Anonymous"; logged in →
-// username + Personal workspace + Logout. Minimal by design: no account
+// username + Personal workspace + «Мои книги» + Logout. Minimal by design: no account
 // management, no workspace switcher (future stages).
 import type { JSX } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { t } from '../../app/i18n';
 import { authMe, authLoading, authError, fetchMe, login, register, logout, loginPrompt, claimLoginPrompt } from '../../state/authStore';
+import { openMyBooks } from '../../app/router';
 
 // Simple person SVG (concept §19: user-circle, NOT a group icon).
 function IconUser(props: JSX.SVGAttributes<SVGSVGElement>) {
@@ -152,7 +153,14 @@ export function UserMenu() {
             )}
           </div>
           {me.authenticated ? (
-            <button class="user-menu__item" role="menuitem" onClick={onLogout}>{t('auth_logout')}</button>
+            <>
+              {/* «Мои книги» — the Library on its «Мои книги» tab, not a separate screen */}
+              <button class="user-menu__item" role="menuitem" data-testid="user-menu-my-books"
+                onClick={() => { setOpen(false); openMyBooks(); }}>
+                {t('my_books')}
+              </button>
+              <button class="user-menu__item" role="menuitem" onClick={onLogout}>{t('auth_logout')}</button>
+            </>
           ) : (
             <>
               <button class="user-menu__item user-menu__item--primary" role="menuitem" onClick={() => { setOpen(false); setDialogMode('login'); }}>
