@@ -104,17 +104,20 @@ describe('startGeneration — a refused start stops the timer and the progress s
       expect(signals.length).toBeGreaterThan(0);
       expect(signals.every((s) => s.aborted)).toBe(true);
       expect(store.isRegenerating.value).toBe(false);
+      expect(store.isNewGenerationPending()).toBe(false);
       expect(store.generationStatus.value).toBe('IDLE');
     });
   }
 
-  it('a running generation keeps its timer and stream when a second start is refused', async () => {
+  it('a running generation keeps its timer, stream, flags and status when a second start is refused', async () => {
     vi.mocked(client.postJson).mockImplementationOnce(async () => ({ build_id: 'b1', summary: null, dirty_scenes: [] }) as never);
     const ok = await store.startGeneration({ ...REQ, workerTypes: [...REQ.workerTypes] }, click());
     await flush();
     expect(ok.ok).toBe(true);
     const startedAt = store.getTimerStartedAt();
     expect(startedAt).toBeGreaterThan(0);
+    const before = { regen: store.isRegenerating.value, pending: store.isNewGenerationPending(), status: store.generationStatus.value };
+    expect(before).toEqual({ regen: true, pending: true, status: 'RUNNING' });
 
     refuseWith(REFUSALS[1]);
     vi.advanceTimersByTime(3_000);
@@ -124,6 +127,8 @@ describe('startGeneration — a refused start stops the timer and the progress s
     vi.advanceTimersByTime(2_000);
     expect(store.liveElapsedSeconds()).toBe(5);
     expect(signals[signals.length - 1].aborted).toBe(false); // the live stream stays open
+    // post171: the flags and the status belong to the running generation
+    expect({ regen: store.isRegenerating.value, pending: store.isNewGenerationPending(), status: store.generationStatus.value }).toEqual(before);
   });
 
   it('a transport error is not treated as a refusal (the server may have started the command)', async () => {

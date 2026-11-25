@@ -234,6 +234,8 @@ export function bumpVBookPollToken(): void { vbookPollState.token++; }
 /** Mark the SSE import_complete handshake as not-yet-received so a stale
  *  latch from the previous import can't instantly finish the next poll. */
 export function markImportIncomplete(): void { progressTracking.importCompleteReceived = false; }
+/** Read-only: a new generation was started and the panel still waits for its first progress. */
+export function isNewGenerationPending(): boolean { return progressTracking.newGenerationPending; }
 
 // ═══════════════════════════════════════════════════════════════
 //  SHARED BOOK-SESSION STATUS (audit B6 — single source of truth)
@@ -657,28 +659,41 @@ interface ArmedStart {
   startedTimer: boolean;
   /** The timer as it was before the click (restored on a refusal). */
   timerBefore: GenerationTimerState;
-  /** A generation session was already running (its progress stream stays). */
-  hadSession: boolean;
+  /** A generation session was already running before the click: the
+   *  refusal leaves it alone (its stream, flags and status). */
+  sessionWasRunning: boolean;
+  /** The session flags / status as they were before the click (post171). */
+  statusBefore: GenerationStatus;
+  newGenerationPendingBefore: boolean;
 }
 
 /**
  * The server refused the command up front — 409 layer_disabled, 422
  * book_has_no_text, 409/422 voice_reference_required: no task was created,
  * nothing runs. Undo everything the click armed before the POST: the session
- * flags, the timer it started (back to its previous value — a stop would show
- * a fresh 0:00 "final" time) and the progress stream it opened (kept when a
- * generation was already running). The generic error path does NOT use this:
+ * flags and status (IDLE — or, when a generation was already running, back to
+ * what they were: they belong to that generation), the timer it started (back
+ * to its previous value — a stop would show a fresh 0:00 "final" time) and the
+ * progress stream it opened (kept when a generation was already running). The generic error path does NOT use this:
  * a transport error / 429 does not prove that nothing runs.
  */
 function settleRefusedStart(armed: ArmedStart): void {
-  isRegenerating.value = false;
-  progressTracking.newGenerationPending = false;
-  setGenerationStatus('IDLE');
+  if (armed.sessionWasRunning) {
+    // post171: the flags and the status belong to the generation that is
+    // running — back to what they were before this click.
+    isRegenerating.value = true;
+    progressTracking.newGenerationPending = armed.newGenerationPendingBefore;
+    if (generationStatus.value !== armed.statusBefore) setGenerationStatus(armed.statusBefore);
+  } else {
+    isRegenerating.value = false;
+    progressTracking.newGenerationPending = false;
+    setGenerationStatus('IDLE');
+    stopProgressStream();
+  }
   if (armed.startedTimer) {
     generationTimer.startedAt = armed.timerBefore.startedAt;
     generationTimer.finalElapsedSeconds = armed.timerBefore.finalElapsedSeconds;
   }
-  if (!armed.hadSession) stopProgressStream();
 }
 
 export async function startGeneration(req: GenerationRequest, action: UserAction): Promise<GenerationResult> {
@@ -689,12 +704,14 @@ export async function startGeneration(req: GenerationRequest, action: UserAction
     console.warn('startGeneration refused: no explicit user action');
     return { ok: false, code: 'no_user_action', message: 'no_user_action' };
   }
-  setGenerationStatus('RUNNING');
   const armed: ArmedStart = {
     startedTimer: generationTimer.startedAt <= 0,
     timerBefore: { ...generationTimer },
-    hadSession: isRegenerating.value,
+    sessionWasRunning: isRegenerating.value,
+    statusBefore: generationStatus.value,
+    newGenerationPendingBefore: progressTracking.newGenerationPending,
   };
+  setGenerationStatus('RUNNING');
   isRegenerating.value = true;
   progressTracking.newGenerationPending = true;
   if (armed.startedTimer) startTimer();
