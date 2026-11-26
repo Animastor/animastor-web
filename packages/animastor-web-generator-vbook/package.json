@@ -1,6 +1,6 @@
 {
   "name": "@animastor/web-generator-vbook",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "VBook agent lifecycle orchestration for Animastor web frontend. Owns the real VBook decision logic — bootstrap-vs-next-window choice, agent-status polling loop, paused/inactive/safety-cap terminal-state classification — parameterized by injected capabilities (identity getter, HTTP transport, poll state, host callbacks). No host stores, signals, api/client, navigation, or playback dependencies; SSE initiation arrives as an injected callback and finalization hands back to the host via onGenerationFinalized.",
   "keywords": [
     "animastor",

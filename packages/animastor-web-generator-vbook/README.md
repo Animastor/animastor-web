@@ -56,6 +56,8 @@ await startVBookGeneration(ports);
 await checkAgentStatus(ports);
 ```
 
+Bootstrap idempotency (0.2.0, animastor-docs `architecture/BOOTSTRAP_IDEMPOTENCY.md`): the POST is sent once and never retried; while it is in flight a repeated `startVBookGeneration` is ignored (bind `poll.isBootstrapInFlight` / `setBootstrapInFlight` to `VBookPollState.bootstrapInFlight`); a 409 `bootstrap_in_progress` makes the package follow the running window's progress instead of failing.
+
 On success the package sets `setGenerationStatus('SUCCESS')`, stops the timer (unless the session is still regenerating), and hands finalization back to the host via `onGenerationFinalized`.
 
 ## Public API
@@ -66,11 +68,12 @@ On success the package sets `setGenerationStatus('SUCCESS')`, stops the timer (u
 | `pollVBookProgress` | function | 2s poll loop — inactive×2 / `paused` / import-handshake finalization, 60min safety cap with agent re-probe |
 | `checkAgentStatus` | function | One `/agent-status` poll + merge + ANALYZING/CREATING_SCENES→COMPLETED classification |
 | `updateVBookProgress` | function | Merge an `/agent-status` payload into the current VBookProgress |
-| `createVBookPollState` | function | Fresh host-owned poll-state object (`{ token: 0 }`) |
+| `createVBookPollState` | function | Fresh host-owned poll-state object (`{ token: 0, bootstrapInFlight: false }`) |
+| `isBootstrapInProgressError` | function | `true` for the server's 409 `bootstrap_in_progress` (another run of the book holds the lock) |
 | `VBookAgentPorts` | interface | Full capability bundle (identity / transport / poll / state / lifecycle) |
 | `VBookIdentityPort` | interface | `getBookId()` |
 | `VBookTransportPort` | interface | `getJson` / `postJsonLong` |
-| `VBookPollState` / `VBookPollContract` | interfaces | Explicit poll-token state (host-owned, passed by reference) |
+| `VBookPollState` / `VBookPollContract` | interfaces | Explicit poll-token state (host-owned, passed by reference); optional `isBootstrapInFlight` / `setBootstrapInFlight` — repeated-start guard (0.2.0) |
 | `VBookHostState` | interface | Host state callbacks (progress, status, regenerating, latches) |
 | `VBookLifecycleCallbacks` | interface | `startTimer` / `stopTimer` / `startStream` / `onVBookCleared` / `onGenerationFinalized` |
 | `VBookPollConfig` | interface | Tuning: `pollIntervalMs`, `errorIntervalMs`, `maxInactive`, `maxPollMs` |

@@ -7,7 +7,9 @@
 //   - checkAgentStatus: one /agent-status poll + agent→progress merge +
 //     ANALYZING/CREATING_SCENES→COMPLETED finalization classification
 //   - startVBookGeneration: bootstrap-vs-bootstrap-next-window decision,
-//     long-timeout POST, poll kick, abort reconciliation with /agent-status
+//     long-timeout POST (once, no retry; repeated-click guard; 409
+//     bootstrap_in_progress → follow progress), poll kick, abort
+//     reconciliation with /agent-status
 //   - pollVBookProgress: 2s poll loop — inactive×2 finalization, `paused`
 //     finalization with the real window counter, 60min safety cap +
 //     agent re-probe, SUCCESS handoff to the host via onGenerationFinalized
@@ -80,10 +82,13 @@ export interface VBookTransportPort {
  *  stops safely on the next token check. */
 export interface VBookPollState {
   token: number;
+  /** A POST /bootstrap | /bootstrap-next-window of this host is in flight
+   *  (repeated-click guard, bootstrap idempotency 2026-11-26). */
+  bootstrapInFlight?: boolean;
 }
 
 export function createVBookPollState(): VBookPollState {
-  return { token: 0 };
+  return { token: 0, bootstrapInFlight: false };
 }
 
 /** Read-side view of the poll state the loops check against. Hosts that
@@ -92,6 +97,28 @@ export function createVBookPollState(): VBookPollState {
 export interface VBookPollContract {
   getPollToken(): number;
   bumpPollToken(): number;
+  /** Repeated-click guard (bootstrap idempotency, animastor-docs
+   *  architecture/BOOTSTRAP_IDEMPOTENCY.md): `true` while this host's
+   *  POST /bootstrap | /bootstrap-next-window is in flight — a second
+   *  startVBookGeneration is then ignored (no second POST). Optional for
+   *  hosts built against 0.1.x; without it there is no client guard (the
+   *  server lock still answers 409). Bind to VBookPollState.bootstrapInFlight. */
+  isBootstrapInFlight?(): boolean;
+  setBootstrapInFlight?(v: boolean): void;
+}
+
+/** `true` for the server's 409 `{ error: 'bootstrap_in_progress' }` — another
+ *  run of this book holds the per-book bootstrap lock. Reads the shapes an
+ *  injected transport may throw: `status` + `code` / `body.error` / message.
+ *  Pure — exported for tests. */
+export function isBootstrapInProgressError(e: unknown): boolean {
+  if (!e || typeof e !== 'object') return false;
+  const err = e as { status?: unknown; code?: unknown; body?: unknown; message?: unknown };
+  if (err.status !== 409) return false;
+  const bodyError = err.body && typeof err.body === 'object' ? (err.body as { error?: unknown }).error : undefined;
+  return err.code === 'bootstrap_in_progress'
+    || bodyError === 'bootstrap_in_progress'
+    || err.message === 'bootstrap_in_progress';
 }
 
 // ── Host state callbacks ─────────────────────────────────────
@@ -343,13 +370,24 @@ export async function pollVBookProgress(
  *  timeout (they block for the whole AI window — minutes). On transport
  *  failure the loop reconciles with /agent-status: a still-running (or
  *  paused) agent keeps the progress UI + timer alive and is tracked to
- *  completion; a genuinely dead session tears the progress down. */
+ *  completion; a genuinely dead session tears the progress down.
+ *
+ *  Bootstrap idempotency (2026-11-26): the POST is sent ONCE — never
+ *  retried here (a non-idempotent window run; the server lock answers a
+ *  repeat with 409). While it is in flight a repeated start is ignored
+ *  (poll.isBootstrapInFlight). 409 bootstrap_in_progress = another run of
+ *  this book is alive → track its progress, not an error. */
 export async function startVBookGeneration(
   ports: VBookAgentPorts,
   config?: VBookPollConfig,
 ): Promise<void> {
   const bid = ports.identity.getBookId();
   if (!bid) return;
+  if (ports.poll.isBootstrapInFlight?.()) {
+    console.warn('startVBookGeneration: bootstrap already in flight — repeated start ignored');
+    return;
+  }
+  ports.poll.setBootstrapInFlight?.(true);
   ports.state.setGenerationStatus('RUNNING');
   // VBook is part of the same generation session as the GPU stages — mark
   // the session regenerating (mirrors startGeneration) so the shared
@@ -367,18 +405,30 @@ export async function startVBookGeneration(
   ports.state.setImportCompleteReceived(false);
   const token = ports.poll.bumpPollToken();
   try {
-    const status = await ports.transport
-      .getJson<BookStatusWire>(`/book/${encodeURIComponent(bid)}/status`)
-      .catch(() => null);
-    const needsBootstrap = status?.ready !== true;
-    if (needsBootstrap) {
-      await ports.transport.postJsonLong(`/book/${encodeURIComponent(bid)}/bootstrap`);
-    } else {
-      await ports.transport.postJsonLong(`/book/${encodeURIComponent(bid)}/bootstrap-next-window`);
+    try {
+      const status = await ports.transport
+        .getJson<BookStatusWire>(`/book/${encodeURIComponent(bid)}/status`)
+        .catch(() => null);
+      const needsBootstrap = status?.ready !== true;
+      // One POST, no retry: a repeat would start a second run of the window.
+      if (needsBootstrap) {
+        await ports.transport.postJsonLong(`/book/${encodeURIComponent(bid)}/bootstrap`);
+      } else {
+        await ports.transport.postJsonLong(`/book/${encodeURIComponent(bid)}/bootstrap-next-window`);
+      }
+    } finally {
+      ports.poll.setBootstrapInFlight?.(false);
     }
     await pollVBookProgress(ports, bid, token, config);
   } catch (e) {
     if (ports.poll.getPollToken() !== token) return;
+    if (isBootstrapInProgressError(e)) {
+      // Another run of this book (other tab / device / earlier click) holds
+      // the server lock: follow its progress instead of failing.
+      console.info('startVBookGeneration: bootstrap_in_progress — following the running window');
+      await pollVBookProgress(ports, bid, token, config);
+      return;
+    }
     console.warn('startVBookGeneration failed:', (e as Error).message);
     // A client-side abort (timeout/network blip) does NOT stop the backend
     // agent — the bootstrap route keeps processing the window. Before
