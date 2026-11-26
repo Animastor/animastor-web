@@ -21,7 +21,7 @@
     "@animastor/web-generator": "^0.3.0",
     "@animastor/web-generator-config": "^0.1.0",
     "@animastor/web-generator-sse": "^0.1.0",
-    "@animastor/web-generator-vbook": "^0.1.0",
+    "@animastor/web-generator-vbook": "^0.2.0",
     "@animastor/web-local-ai": "^0.1.0",
     "@animastor/web-navigator": "^0.1.0",
     "@animastor/web-player": "^0.1.0",

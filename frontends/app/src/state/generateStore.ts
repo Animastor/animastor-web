@@ -217,6 +217,10 @@ const vbookPollState = createVBookPollState();
  *  (Previously inlined in the File-slice closeBook.) */
 export function stopGenerationSession(): void {
   vbookPollState.token++;
+  // Closing the book releases the click guard: the next book (or this one
+  // reopened) may start; a still-running server window answers 409
+  // bootstrap_in_progress and the client follows it.
+  vbookPollState.bootstrapInFlight = false;
   stopProgressStream();
   stopTimer();
   setGenerationStatus('IDLE');
@@ -483,6 +487,12 @@ const vbookAgentPorts: VBookAgentPorts = {
   poll: {
     getPollToken: () => vbookPollState.token,
     bumpPollToken: () => { return ++vbookPollState.token; },
+    // Repeated-click guard (bootstrap idempotency, @animastor/web-generator-vbook
+    // 0.2.0, animastor-docs architecture/BOOTSTRAP_IDEMPOTENCY.md): a second
+    // «Генерировать VBook» while POST /bootstrap | /bootstrap-next-window is in
+    // flight sends nothing.
+    isBootstrapInFlight: () => !!vbookPollState.bootstrapInFlight,
+    setBootstrapInFlight: (v) => { vbookPollState.bootstrapInFlight = v; },
   },
   state: {
     getVBookProgress: () => vbookProgress.value,
