@@ -19,6 +19,10 @@ const POLL_PATHS = [
   '/generate/commands/abc',
   '/generate',
   '/book/ba_1/heroes/yura/voice/candidates',
+  // generate API v2, book-scoped (2026-11-27)
+  '/book/X/generate/progress',
+  '/book/X/generate/stream',
+  '/book/X/generate/progress?t=1',
 ];
 const CACHEABLE_PATHS = [
   '/book/ba_1',
@@ -29,6 +33,7 @@ const CACHEABLE_PATHS = [
   '/connectors/x/status-page',
   '/worker/counts-history',
   '/generated/x',
+  '/book/X/generate-next',
 ];
 
 describe('isNoStorePath', () => {
