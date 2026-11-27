@@ -27,7 +27,7 @@ import type { SseEvent } from '../api/client';
 import { requestPanelRefresh, sseEventRequestsPanelRefresh } from './panelRefresh';
 import type {
   BookData, DiffSummary,
-  ProgressPanelResponse, RegenerateResponse, WorkerCounts,
+  ProgressPanelResponse, WorkerCounts,
 } from '../api/models';
 import {
   loadLayerConfig as loadLayerConfigDomain,
@@ -39,6 +39,12 @@ import type { SceneRef } from '../api/models';
 import { navigateTo, position } from './positionStore';
 import { t, tf, vbookStageLabel } from '../app/i18n';
 import { classifyStartError, layerLabels } from '../features/generation/commandErrors';
+// Generate API v2 (ADR ORCHESTRATION_V2 §11.1–11.2): /generate, /generate/stop,
+// /generate/progress, /generate/stream — wire types + pure helpers.
+import {
+  aggregateToPanel, parseGenStreamEvent, stopBody, toGenerateScope,
+} from '../features/generation/generateApi';
+import type { GenerateMode, GenerateResponse, GenLayer, GenProgress } from '../features/generation/generateApi';
 // ── Identity contour (owned by @animastor/web-book-session — re-exported 1:1) ──
 // Single source of truth for book identity; this module is only a
 // consumption/re-export surface so existing consumer imports keep resolving.
@@ -49,7 +55,7 @@ export {
 } from '@animastor/web-book-session';
 export type { PersistedBookSession } from '@animastor/web-book-session';
 import {
-  bookId, buildId, setGenerationBuildId,
+  bookId, buildId,
 } from '@animastor/web-book-session';
 import {
   applyAnalysisEvent, analysisOverallPercent as analysisOverallPercentDomain,
@@ -596,12 +602,70 @@ export function startProgressStream(bId: string): void {
     progressTracking,
     bId,
   );
+  startGenStream(bId);
 }
 
 export function stopProgressStream(): void {
   sseStream.epoch++;
   sseStream.controller?.abort();
   sseStream.controller = null;
+  stopGenStream();
+}
+
+// ── Generation stream (generate API v2): GET /generate/stream ──
+// The orchestration progress comes ONLY from this stream (PG NOTIFY on the
+// server, no Redis). Every event carries the fresh ADR §9 aggregate (also
+// right after connect / reconnect); it is kept in `genProgress` and the panel
+// loop is asked to re-poll at once. The /progress-stream above stays for the
+// VBook / analysis events only (they are not orchestration work — задача H).
+/** The last §9 aggregate the stream delivered (null: none yet / stream stopped). */
+export const genProgress = signal<GenProgress | null>(null);
+const genStream = { controller: null as AbortController | null, epoch: 0 };
+const GEN_STREAM_RETRY_MS = [1000, 2000, 5000, 10000];
+
+async function runGenStream(bId: string, epoch: number, abort: AbortSignal): Promise<void> {
+  let attempt = 0;
+  while (genStream.epoch === epoch && !abort.aborted) {
+    try {
+      for await (const ev of sse(`/book/${encodeURIComponent(bId)}/generate/stream`, abort)) {
+        if (genStream.epoch !== epoch) return;
+        const parsed = ev.data ? parseGenStreamEvent(ev.data) : null;
+        if (!parsed) continue;
+        attempt = 0;
+        genProgress.value = parsed.progress;
+        requestPanelRefresh('sse');
+      }
+    } catch (e) {
+      if (abort.aborted || genStream.epoch !== epoch) return;
+      // 409 book_not_v2 / 401: the stream will not work for this book — stop retrying
+      const status = (e as { status?: number }).status;
+      if (status === 409 || status === 401 || status === 403 || status === 404) return;
+    }
+    if (abort.aborted || genStream.epoch !== epoch) return;
+    const wait = GEN_STREAM_RETRY_MS[Math.min(attempt, GEN_STREAM_RETRY_MS.length - 1)];
+    attempt += 1;
+    await new Promise((r) => setTimeout(r, wait));
+  }
+}
+
+function startGenStream(bId: string): void {
+  stopGenStream();
+  const epoch = ++genStream.epoch;
+  genStream.controller = new AbortController();
+  void runGenStream(bId, epoch, genStream.controller.signal);
+}
+
+function stopGenStream(): void {
+  genStream.epoch++;
+  genStream.controller?.abort();
+  genStream.controller = null;
+  genProgress.value = null;
+}
+
+/** GET /generate/progress (no-store) → the Generator panel input (computeProgressRows). */
+export async function fetchGenProgressPanel(bId: string, opts: { timeoutMs?: number; signal?: AbortSignal } = {}): Promise<ProgressPanelResponse> {
+  const agg = await getJson<GenProgress>(`/book/${encodeURIComponent(bId)}/generate/progress`, opts);
+  return aggregateToPanel(agg);
 }
 
 // Analysis/progress SSE event routing (JSON parse + dispatch) lives in
@@ -623,9 +687,11 @@ export interface GenerationRequest {
   scope: string;
   chapterId: string | null;
   sceneId: string | null;
+  /** «Сгенерировать недостающее» = missing (default), «Перегенерировать» = all (ADR §11.2). */
+  mode?: GenerateMode;
 }
 export type GenerationResult =
-  | { ok: true; dirty: number; scope: string }
+  | { ok: true; dirty: number; scope: string; commandId: string; existing: boolean; jobsCreated: number; skippedReady: number }
   | { ok: false; message: string; code?: 'layer_disabled' | 'no_user_action' | 'voice_reference_required' | 'book_has_no_text' };
 
 // ── Explicit user action (reports/2026-11-04/regenerate-sweep-fix.md) ──
@@ -663,7 +729,10 @@ function isUserAction(a: unknown): a is UserAction {
   return !!v && v.kind === 'user_click' && typeof v.source === 'string' && typeof v.actionId === 'string';
 }
 
-/** What startGeneration armed before the POST /regenerate. */
+/** The last command the Generator sent (POST /generate answer). */
+export const lastCommand = signal<{ commandId: string; existing: boolean; mode: GenerateMode; summary: GenerateResponse['summary'] | null } | null>(null);
+
+/** What startGeneration armed before the POST /generate. */
 interface ArmedStart {
   /** The click started the timer (no generation was being timed). */
   startedTimer: boolean;
@@ -727,25 +796,23 @@ export async function startGeneration(req: GenerationRequest, action: UserAction
   if (armed.startedTimer) startTimer();
   startProgressStream(bId);
   try {
-    const res = await postJson<RegenerateResponse>(`/book/${encodeURIComponent(bId)}/regenerate`, {
-      rebuild_all: true,
-      worker_types: req.workerTypes,
-      scope: req.scope,
-      chapter_id: req.chapterId,
-      scene_id: req.sceneId,
-      client_action: {
-        kind: action.kind,
-        source: action.source,
-        action_id: action.actionId,
-        trusted: action.trusted,
-      },
+    const scope = toGenerateScope(req.scope, req.chapterId, req.sceneId);
+    if (!scope) throw Object.assign(new Error('no position for the scope'), { status: 0 });
+    // generate API v2: one client_action_id per click (the UserAction id);
+    // the answer is {command_id, existing, summary} — no build_id.
+    const res = await postJson<GenerateResponse>(`/book/${encodeURIComponent(bId)}/generate`, {
+      scope,
+      layers: req.workerTypes as GenLayer[],
+      mode: req.mode ?? 'missing',
+      client_action_id: action.actionId,
     });
-    if (res.build_id) setGenerationBuildId(res.build_id);
+    lastCommand.value = { commandId: res.command_id, existing: res.existing === true, mode: res.mode ?? req.mode ?? 'missing', summary: res.summary ?? null };
     phase.value = 'SCENE_READY';
-    dirtySummary.value = res.summary ?? null;
-    const dirty = res.dirty_scenes?.length ?? 0;
     void refreshAssetsState();
-    return { ok: true, dirty, scope: res.scope ?? req.scope };
+    return {
+      ok: true, dirty: 0, scope: req.scope, commandId: res.command_id, existing: res.existing === true,
+      jobsCreated: res.summary?.jobs_created ?? 0, skippedReady: res.summary?.skipped_ready ?? 0,
+    };
   } catch (e) {
     // Stage 155: 409 layer_disabled — the server created no task (every
     // requested layer is switched off). Nothing runs, so the session is not
@@ -837,7 +904,8 @@ export async function applyGenerationResults(): Promise<void> {
 /** Backend cancellation request ONLY (transport; no host-state writes). */
 async function requestCancelGeneration(bId: string): Promise<void> {
   try {
-    await postJson(`/book/${encodeURIComponent(bId)}/cancel-generation`);
+    // generate API v2: stop of the whole book ({} — commands, jobs and VBook sessions)
+    await postJson(`/book/${encodeURIComponent(bId)}/generate/stop`, {});
   } catch (e) {
     console.warn('cancelGeneration: backend call failed:', (e as Error).message);
   }
@@ -911,6 +979,14 @@ export async function cancelTask(type: string, taskId?: string | null): Promise<
     vbookPollState.token++;
   }
   try {
+    // generate API v2: a row ■ stops its command, a section ■ its layer.
+    // VBook / cover are not orchestration layers — they keep cancel-worker (задача H).
+    const body = stopBody(type, taskId ?? null);
+    if (body) {
+      const res = await postJson<{ ok?: boolean; command_id?: string } | null>(`/book/${encodeURIComponent(bId)}/generate/stop`, body);
+      if (!taskId) return res?.ok === true;
+      return res?.ok === true && res.command_id === taskId;
+    }
     const res = await postJson<{ ok?: boolean; task_ids?: string[] } | null>(`/book/${encodeURIComponent(bId)}/cancel-worker`, {
       type,
       task_id: taskId ?? null,
@@ -950,7 +1026,7 @@ export async function checkAndRestoreGenerationState(): Promise<void> {
   try {
     const [panel, counts] = await Promise.all([
       // no-store by default (api/client.ts isNoStorePath) — О1
-      getJson<ProgressPanelResponse>(`/book/${encodeURIComponent(currentBookId)}/progress-panel`, { timeoutMs: POLL_REQUEST_TIMEOUT_MS }),
+      fetchGenProgressPanel(currentBookId, { timeoutMs: POLL_REQUEST_TIMEOUT_MS }),
       getJson<WorkerCounts>('/worker/counts', { timeoutMs: POLL_REQUEST_TIMEOUT_MS }),
     ]);
     const hasActiveGpuTasks = panel.any_incomplete;

@@ -2,7 +2,7 @@ import type { JSX } from 'preact';
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { getJson, POLL_REQUEST_TIMEOUT_MS } from '../api/client';
 import { onPanelRefreshRequested, requestPanelRefresh, waitForNextPoll } from '../state/panelRefresh';
-import type { BookData, BookChapter, BookScene, ProgressPanelResponse, WorkerCounts } from '../api/models';
+import type { BookData, BookChapter, BookScene, WorkerCounts } from '../api/models';
 import { t, tf } from '../app/i18n';
 import { navigate } from '../app/router';
 import { useDesktopShell } from '../app/desktop';
@@ -12,6 +12,7 @@ import {
   audioEnabled, imageEnabled, videoEnabled, vbookEnabled, layerConfigSaving,
   setAudioEnabled, setImageEnabled, setVideoEnabled, setVBookEnabled,
   startGeneration, startVBookGeneration, cancelGeneration, cancelTask, retryStoppedTask, dismissStoppedTask, dismissedTaskIds,
+  fetchGenProgressPanel,
   checkAndRestoreGenerationState, checkVBookAgentStatus, computeProgressRows,
   resetGenerationStatus, onPlaybackPrepared,
   liveElapsedSeconds, formatTimerText,
@@ -24,6 +25,8 @@ import { resilientReload, sharedRecovery } from '../state/resilientReloader';
 import { toast } from '../lib/ui';
 import { IconPlay, IconStop, IconSettings, IconLibrary, IconVolumeUp, IconVolumeOff, IconImage, IconImageOff, IconVideocam, IconVideocamOff } from '../app/icons';
 import { AnalysisProgressPanel } from './AnalysisProgressPanel';
+import { regenerateNeedsConfirm } from '../features/generation/generateApi';
+import type { GenerateMode } from '../features/generation/generateApi';
 import { ReasoningBudgetNotice, isReasoningBudgetError, reasoningBudgetProvider } from '../features/ai/reasoning';
 
 // GeneratePage — 1:1 with GenerateFragment + fragment_generate.xml (stage 4).
@@ -195,10 +198,8 @@ export function GeneratePage(props: { path?: string }) {
         const bId = bookId.value;
         if (bId) {
           try {
-            const panelRes = await getJson<ProgressPanelResponse>(
-              `/book/${encodeURIComponent(bId)}/progress-panel`,
-              { timeoutMs: POLL_REQUEST_TIMEOUT_MS, signal: stop.signal },
-            );
+            // generate API v2: GET /generate/progress (ADR §9 aggregate) → panel rows
+            const panelRes = await fetchGenProgressPanel(bId, { timeoutMs: POLL_REQUEST_TIMEOUT_MS, signal: stop.signal });
             const vbookProg = vbookProgress.value;
             const hasVBook = vbookProg != null && vbookProg.stage !== 'IDLE';
             let vbookToShow = vbookProg;
@@ -473,8 +474,9 @@ export function GeneratePage(props: { path?: string }) {
       {scopeFor != null && (
         <ScopeDialog
           hasPosition={pos.chapterId != null}
+          twoModes={scopeFor === 'audio' || scopeFor === 'image' || scopeFor === 'video'}
           onCancel={() => setScopeFor(null)}
-          onStart={(scope, ev) => {
+          onStart={(scope, ev, mode) => {
             setScopeFor(null);
             const chId = scope !== 'whole_book' ? pos.chapterId : null;
             const scId = (scope === 'current_scene' || scope === 'from_current_scene') ? pos.sceneId : null;
@@ -491,10 +493,11 @@ export function GeneratePage(props: { path?: string }) {
             } else if (scopeFor === 'audio' || scopeFor === 'image' || scopeFor === 'video') {
               void (async () => {
                 const res = await startGeneration(
-                  { workerTypes: [scopeFor], scope, chapterId: chId, sceneId: scId },
+                  { workerTypes: [scopeFor], scope, chapterId: chId, sceneId: scId, mode },
                   userAction('generator.scope_dialog', ev),
                 );
-                if (res.ok) toast(tf('generate_started_layer', t(scopeFor === 'audio' ? 'progress_label_audio' : scopeFor === 'image' ? 'progress_label_image' : 'progress_label_video')));
+                if (res.ok && !res.existing && res.jobsCreated === 0 && res.skippedReady > 0) toast(tf('generate_nothing_missing', res.skippedReady));
+                else if (res.ok) toast(tf('generate_started_layer', t(scopeFor === 'audio' ? 'progress_label_audio' : scopeFor === 'image' ? 'progress_label_image' : 'progress_label_video')));
                 else toast(res.code === 'layer_disabled' || res.code === 'book_has_no_text' ? res.message : tf('generate_start_failed', res.message));
               })();
             }
@@ -822,10 +825,14 @@ function buildLabels(): TaskLabels {
 // regenerate-sweep-fix.md — a /regenerate the owner did not intend).
 export const SCOPE_DIALOG_ARM_MS = 400;
 
-function ScopeDialog({ hasPosition, onCancel, onStart }: {
+function ScopeDialog({ hasPosition, twoModes, onCancel, onStart }: {
   hasPosition: boolean;
+  /** Layer generation (audio / image / video): two buttons — «Сгенерировать
+   *  недостающее» (mode missing) and «Перегенерировать» (mode all, confirmed
+   *  for a scope wider than one scene; ADR §11.2). VBook «Сгенерировать всё»: one. */
+  twoModes: boolean;
   onCancel: () => void;
-  onStart: (scope: string, ev: Event) => void;
+  onStart: (scope: string, ev: Event, mode: GenerateMode) => void;
 }) {
   const [scope, setScope] = useState('whole_book');
   const openedAt = useRef(Date.now());
@@ -878,13 +885,35 @@ function ScopeDialog({ hasPosition, onCancel, onStart }: {
         </div>
         <div class="modal__footer">
           <button class="btn btn--outlined" ref={cancelRef} onClick={onCancel}>{t('dialog_cancel')}</button>
-          <button
-            class="btn"
-            onClick={(ev) => {
-              if (Date.now() - openedAt.current < SCOPE_DIALOG_ARM_MS) return;
-              onStart(scope, ev);
-            }}
-          >{t('dialog_start')}</button>
+          {twoModes ? (
+            <>
+              <button
+                class="btn btn--outlined"
+                data-mode="all"
+                onClick={(ev) => {
+                  if (Date.now() - openedAt.current < SCOPE_DIALOG_ARM_MS) return;
+                  if (regenerateNeedsConfirm(scope) && !window.confirm(t('generate_regenerate_confirm'))) return;
+                  onStart(scope, ev, 'all');
+                }}
+              >{t('generate_mode_all')}</button>
+              <button
+                class="btn"
+                data-mode="missing"
+                onClick={(ev) => {
+                  if (Date.now() - openedAt.current < SCOPE_DIALOG_ARM_MS) return;
+                  onStart(scope, ev, 'missing');
+                }}
+              >{t('generate_mode_missing')}</button>
+            </>
+          ) : (
+            <button
+              class="btn"
+              onClick={(ev) => {
+                if (Date.now() - openedAt.current < SCOPE_DIALOG_ARM_MS) return;
+                onStart(scope, ev, 'missing');
+              }}
+            >{t('dialog_start')}</button>
+          )}
         </div>
       </div>
     </div>

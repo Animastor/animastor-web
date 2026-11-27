@@ -30,7 +30,7 @@ interface ErrorLike { status?: number; message?: string; body?: unknown }
  *  types — the fallback when the server body lists none. */
 export function classifyStartError(e: unknown, requested: string[]): StartErrorKind {
   const err = (e ?? {}) as ErrorLike;
-  const body = (err.body ?? null) as { error?: unknown; code?: unknown; disabled_worker_types?: unknown; character_ids?: unknown } | null;
+  const body = (err.body ?? null) as { error?: unknown; code?: unknown; disabled_worker_types?: unknown; disabled_layers?: unknown; character_ids?: unknown } | null;
   if (err.status === 409 && body && body.code === 'voice_reference_required') {
     const ids = Array.isArray(body.character_ids) ? body.character_ids.filter((x): x is string => typeof x === 'string') : [];
     return { kind: 'voice_reference_required', characterIds: ids };
@@ -38,10 +38,12 @@ export function classifyStartError(e: unknown, requested: string[]): StartErrorK
   if (err.status === 422 && body && (body.code === 'book_has_no_text' || body.error === 'book_has_no_text')) {
     return { kind: 'book_has_no_text' };
   }
-  if (err.status === 409 && body && body.error === 'layer_disabled') {
-    const listed = Array.isArray(body.disabled_worker_types)
-      ? body.disabled_worker_types.filter((x): x is string => typeof x === 'string')
-      : [];
+  // /regenerate: { error: 'layer_disabled', disabled_worker_types };
+  // generate API v2 (/generate): { code: 'layer_disabled', disabled_layers }
+  if (err.status === 409 && body && (body.error === 'layer_disabled' || body.code === 'layer_disabled')) {
+    const raw = Array.isArray(body.disabled_worker_types) ? body.disabled_worker_types
+      : Array.isArray(body.disabled_layers) ? body.disabled_layers : [];
+    const listed = raw.filter((x): x is string => typeof x === 'string');
     return { kind: 'layer_disabled', workerTypes: listed.length > 0 ? listed : [...requested] };
   }
   return { kind: 'other', message: err.message || String(e) };

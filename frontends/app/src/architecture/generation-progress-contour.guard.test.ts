@@ -286,7 +286,8 @@ describe('Step 14 prep — cancel: request vs session teardown boundary', () => 
     const leg = store.slice(store.indexOf('async function requestCancelGeneration('));
     const legBody = leg.slice(0, leg.indexOf('\n}'));
     // The request leg performs ONLY the transport call — no host-state writes.
-    expect(legBody).toContain('cancel-generation');
+    // generate API v2 (2026-11-27): the book stop is POST /generate/stop {}
+    expect(legBody).toContain('/generate/stop');
     expect(legBody).not.toMatch(/\.value\s*=/);
     expect(legBody).not.toMatch(/\b(setGenerationStatus|stopTimer|stopProgressStream|resetProgressState|resetAnalysisProgress)\b/);
   });

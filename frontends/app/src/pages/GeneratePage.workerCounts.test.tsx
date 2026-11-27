@@ -35,7 +35,8 @@ vi.mock('../api/client', () => ({
         available_active_audio: 0, available_active_image: 0, available_active_video: 0,
       };
     }
-    if (url.endsWith('/progress-panel')) return { tasks: [], overall_percent: 0, any_incomplete: false };
+    // generate API v2: the panel polls GET /generate/progress (the §9 aggregate)
+    if (url.endsWith('/generate/progress')) return { book_id: 'b1', orchestration: 'v2', active: false, totals: {}, commands: [] };
     if (url.includes('/assets-state')) return {};
     if (url.startsWith('/book/')) return { book_id: BOOK, chapters: [] };
     return {};
@@ -60,7 +61,7 @@ function callsTo(pred: (url: string) => boolean): unknown[][] {
   return getJson.mock.calls.filter((c) => pred(String(c[0])));
 }
 const countsCalls = () => callsTo((u) => u.startsWith('/worker/counts'));
-const panelCalls = () => callsTo((u) => u.endsWith('/progress-panel'));
+const panelCalls = () => callsTo((u) => u.endsWith('/generate/progress'));
 
 async function flush(ms = 0): Promise<void> {
   await vi.advanceTimersByTimeAsync(ms);
@@ -162,7 +163,7 @@ describe('Generator worker-counts poll does not freeze', () => {
     let hang = true;
     const orig = getJson.getMockImplementation() as (url: string) => Promise<unknown>;
     getJson.mockImplementation(async (url: string, init?: { signal?: AbortSignal; timeoutMs?: number }) => {
-      if (url.endsWith('/progress-panel') && hang) {
+      if (url.endsWith('/generate/progress') && hang) {
         hang = false;
         // the real client rejects with 408 after timeoutMs; emulate it
         return new Promise((_res, rej) => setTimeout(() => rej(new Error('Request timeout')), init?.timeoutMs ?? 30_000));
