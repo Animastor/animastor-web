@@ -136,6 +136,9 @@ const NO_STORE_GET_PATHS: readonly RegExp[] = [
   /^\/worker\/counts(?:[/?]|$)/,
   // v2 generation API (/generate/*), present and future
   /^\/generate(?:[/?]|$)/,
+  // book-scoped generate API v2 (ADR ORCHESTRATION_V2 §11.1): /book/:id/generate,
+  // /generate/progress, /generate/stream (not /generate-next)
+  /^\/book\/[^/?]+\/generate(?:[/?]|$)/,
   // voice reference candidates of a hero (HERO_CARD.md §6) — polled every 3 s
   // while a design / upload command runs
   /^\/book\/[^/?]+\/heroes\/[^/?]+\/voice\/candidates(?:[/?]|$)/,

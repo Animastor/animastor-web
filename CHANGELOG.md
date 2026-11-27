@@ -3,6 +3,13 @@
 Нормативно — `animastor-docs` (`CHANGELOG.md`, `architecture/ORCHESTRATION_V2.md` §11,
 паритет — `architecture/ANDROID_WEB_PARITY.md`). Здесь — краткая запись по репозиторию.
 
+## 2026-11-27 — no-store для `/book/:id/generate/*` (ветка `fix/gen-listen-nostore`)
+
+- `api/client.ts` `isNoStorePath`: добавлен `/book/:id/generate(/…)` — `GET /generate/progress` (полл панели) и
+  `/generate/stream` идут с `cache: 'no-store'` (О1); `/generate-next` по-прежнему по умолчанию. Тот же список, что у
+  backend `middleware/no-store.js` и Android `PollRequests.kt`.
+- Тест `client.nostore.test.ts` +4 пути. vitest 474/0, `tsc --noEmit` OK, `vite build` OK.
+
 ## 2026-11-27 — generate API v2 (ветка `feat/generate-api-v2`)
 
 - Генератор (`frontends/app`) говорит с новым API оркестрации (ADR ORCHESTRATION_V2 §11.1–11.2):
