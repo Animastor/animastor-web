@@ -6,6 +6,8 @@
 //  the app ask that loop to poll NOW instead of waiting for the next tick:
 //   - an SSE `generation_complete`, or a `progress` event of a v2 command
 //     (`command_id` present) — the server state just changed;
+//   - generate API v2: every `gen_progress` event of GET /generate/stream
+//     (generateStore runGenStream; also right after connect / reconnect);
 //   - the tab becomes visible again / the page is restored from bfcache
 //     (the poll may have been frozen by the mobile browser).
 //  It carries no data: the panel is always re-read from the server.

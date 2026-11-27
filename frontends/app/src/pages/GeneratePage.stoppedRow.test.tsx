@@ -18,9 +18,10 @@ vi.mock('../api/client', () => ({
   API_BASE: 'http://test',
   getJson: vi.fn(async () => ({})),
   putJson: vi.fn(async () => ({})),
-  postJson: vi.fn(async (url: string, body?: { task_id?: string | null }) => (url.endsWith('/cancel-worker')
-    ? { ok: true, task_ids: body?.task_id ? [body.task_id] : [] }
-    : { book_id: 'b1', build_id: 'build_b1', scope: 'whole_book', dirty_scenes: [] })),
+  // generate API v2: the row ■ is /generate/stop {command_id}, ▶ is /generate
+  postJson: vi.fn(async (url: string, body?: { command_id?: string | null }) => (url.endsWith('/generate/stop')
+    ? { ok: true, target: 'command', command_id: body?.command_id }
+    : { book_id: 'b1', command_id: 'cmd-1', existing: false, summary: { jobs_created: 1, joined: 0, skipped_ready: 0 } })),
   postJsonLong: vi.fn(async () => ({})),
   deleteJson: vi.fn(async () => ({})),
   getBlob: vi.fn(async () => new Blob([])),
@@ -87,7 +88,7 @@ describe('StoppedRow', () => {
     expect(container.querySelector('.gen-row__caption')?.textContent).toBe('Глава 1 · Сцена 3');
   });
 
-  it('■ «Снять» → one cancel-worker for the task, the task id is dismissed; double tap ignored; no /regenerate', async () => {
+  it('■ «Снять» → one /generate/stop for the command, the task id is dismissed; double tap ignored; no command', async () => {
     const { container } = render(
       <StoppedRow row={row('interrupted')} name="Аудио" countText="2/5" status="прервано" caption={null} />,
     );
@@ -97,12 +98,12 @@ describe('StoppedRow', () => {
     fireEvent.click(stop);
     await vi.advanceTimersByTimeAsync(10);
     const urls = postJson.mock.calls.map((c) => String(c[0]));
-    expect(urls).toEqual(['/book/b1/cancel-worker']);
-    expect(postJson.mock.calls[0][1]).toEqual({ type: 'audio', task_id: 'generation-audio-interrupted' });
+    expect(urls).toEqual(['/book/b1/generate/stop']);
+    expect(postJson.mock.calls[0][1]).toEqual({ command_id: 'generation-audio-interrupted' });
     expect([...dismissedTaskIds.value]).toEqual(['generation-audio-interrupted']);
   });
 
-  it('▶ «Продолжить» → exactly one /regenerate with client_action source generator.retry_row', async () => {
+  it('▶ «Продолжить» → exactly one /generate (mode missing, its own client_action_id)', async () => {
     const { container } = render(
       <StoppedRow row={row('blocked')} name="Аудио" countText="2/5" status="ожидает воркер" caption={null} />,
     );
@@ -111,10 +112,12 @@ describe('StoppedRow', () => {
     fireEvent.click(play);
     fireEvent.click(play);
     await vi.advanceTimersByTimeAsync(10);
-    const regen = postJson.mock.calls.filter((c) => String(c[0]).endsWith('/regenerate'));
+    expect(postJson.mock.calls.filter((c) => String(c[0]).endsWith('/regenerate'))).toEqual([]);
+    const regen = postJson.mock.calls.filter((c) => String(c[0]).endsWith('/generate'));
     expect(regen).toHaveLength(1);
-    expect((regen[0][1] as { client_action: unknown }).client_action).toMatchObject({ kind: 'user_click', source: 'generator.retry_row' });
-    expect(postJson.mock.calls.filter((c) => String(c[0]).endsWith('/cancel-worker'))).toEqual([]);
+    expect(regen[0][1]).toMatchObject({ layers: ['audio'], mode: 'missing' });
+    expect((regen[0][1] as { client_action_id: string }).client_action_id).toMatch(/^ua-/);
+    expect(postJson.mock.calls.filter((c) => String(c[0]).endsWith('/generate/stop'))).toEqual([]);
   });
 
   it('taps within STOPPED_ROW_ARM_MS of the row appearing are ignored', async () => {

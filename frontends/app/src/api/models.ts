@@ -597,6 +597,22 @@ export interface ProgressTask {
   visible: boolean;
   indeterminate: boolean;
   cancelled: boolean;
+  // The status fields the Generator rows read (@animastor/web-generator
+  // models.ts ProgressTask); generate API v2 rows (features/generation/
+  // generateApi.ts aggregateToPanel) fill them from the §9 aggregate.
+  status?: string | null;
+  blocked?: boolean;
+  blocked_reason?: string | null;
+  interrupted?: boolean;
+  failed?: boolean;
+  failed_scene?: { chapter_id?: string | null; scene_id?: string | null } | null;
+  error_class?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  retrying?: boolean;
+  retry_no?: number | null;
+  retry_max?: number | null;
+  retry_at?: number | null;
 }
 
 // GET /book/{id}/agent-status — AgentStatusResponse

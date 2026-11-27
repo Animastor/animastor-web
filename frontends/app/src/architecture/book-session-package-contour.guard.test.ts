@@ -144,10 +144,15 @@ describe('book-session package — buildId hybrid ownership', () => {
       .not.toMatch(/buildId\.value\s*=/);
   });
 
-  it('rule 7 — generation updates buildId ONLY through the controlled setter', () => {
+  it('rule 7 — generation does not write buildId (generate API v2: the answer has no build_id)', () => {
+    // ADR ORCHESTRATION_V2 §11.2 (2026-11-27): POST /generate answers
+    // {command_id, existing, summary}; build_id is not read. The controlled
+    // setter stays re-exported for its package consumers, but the generation
+    // leg of the host store no longer calls it.
     const store = requireRaw(HOST_STORE);
-    expect(store).toContain('setGenerationBuildId(res.build_id)');
-    // the setter is consumed from the package (single writer surface)
+    expect(store).not.toMatch(/setGenerationBuildId\(/);
+    expect(store).not.toMatch(/\bres\.build_id\b/);
+    // identity is still consumed from the package (single writer surface)
     const pkgImport = importSpecifiers(store).find((s) => s === PACKAGE_NAME);
     expect(pkgImport).toBe(PACKAGE_NAME);
   });
