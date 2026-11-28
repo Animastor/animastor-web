@@ -4,14 +4,14 @@
 // ═══════════════════════════════════════════════════════════════
 //  reports/2026-11-05/release-J.md §6.6: the «Audio Workers» chip stayed at
 //  the 08:02:11 snapshot for 30 minutes — GET /worker/counts stopped reaching
-//  the network while progress-panel kept polling. Pinned here:
+//  the network while progress poll kept polling. Pinned here:
 //   - counts are requested with a 10 s poll timeout; `cache: 'no-store'` is
 //     the api/client default for /worker/counts (isNoStorePath, О1 —
 //     pinned in src/api/client.nostore.test.ts);
 //   - one request on mount;
 //   - the chip follows a changed response (0 → 1) without a reload;
 //   - the tab becoming visible again → an immediate request (not the next tick);
-//   - the counts poll runs as long as the progress-panel poll does, and both
+//   - the counts poll runs as long as the progress poll does, and both
 //     stop on unmount.
 //  Only the network transport is mocked (same strategy as GeneratePage.commands.test.tsx).
 
@@ -140,7 +140,7 @@ describe('Generator worker-counts poll does not freeze', () => {
   });
 
   // О1 (reports/2026-11-07/orch-v2-image-scene-run.md): the panel froze on 0/1.
-  it('О1: tab visible / pageshow / requestPanelRefresh → progress-panel re-polled at once', async () => {
+  it('О1: tab visible / pageshow / requestPanelRefresh → progress poll re-polled at once', async () => {
     render(<GeneratePage path="/generate" />);
     await flush(50);
     await flush(100); // inside the 1.5 s sleep
@@ -159,7 +159,7 @@ describe('Generator worker-counts poll does not freeze', () => {
     for (const c of panelCalls()) expect(c[1]).toMatchObject({ timeoutMs: 10_000 });
   });
 
-  it('О1: one hung progress-panel request does not stop the loop', async () => {
+  it('О1: one hung progress poll request does not stop the loop', async () => {
     let hang = true;
     const orig = getJson.getMockImplementation() as (url: string) => Promise<unknown>;
     getJson.mockImplementation(async (url: string, init?: { signal?: AbortSignal; timeoutMs?: number }) => {

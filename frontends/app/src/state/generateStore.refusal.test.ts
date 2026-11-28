@@ -3,7 +3,7 @@
 //  GENERATE STORE — a refused start leaves no timer / progress stream
 // ═══════════════════════════════════════════════════════════════
 //  startGeneration arms the timer and opens the progress stream BEFORE
-//  POST /regenerate. When the server refuses the command up front — 409
+//  POST /generate. When the server refuses the command up front — 409
 //  layer_disabled, 422 book_has_no_text, 409 voice_reference_required — no
 //  task exists, so the timer must not tick and the stream must be closed
 //  (stage171; before, both kept running after the refusal toast).
@@ -54,7 +54,7 @@ let client: Client;
 const REQ = { workerTypes: ['audio'], scope: 'whole_book', chapterId: null, sceneId: null } as const;
 
 const REFUSALS = [
-  { name: '409 layer_disabled', status: 409, body: { error: 'layer_disabled', message: 'off', disabled_worker_types: ['audio'] }, code: 'layer_disabled' },
+  { name: '409 layer_disabled', status: 409, body: { code: 'layer_disabled', error: 'off', disabled_layers: ['audio'] }, code: 'layer_disabled' },
   { name: '422 book_has_no_text', status: 422, body: { error: 'book_has_no_text', code: 'book_has_no_text', message: 'no text' }, code: 'book_has_no_text' },
   { name: '409 voice_reference_required', status: 409, body: { error: 'voice_reference_required', code: 'voice_reference_required', character_ids: ['hero'] }, code: 'voice_reference_required' },
 ];

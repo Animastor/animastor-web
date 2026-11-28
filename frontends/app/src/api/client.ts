@@ -57,7 +57,7 @@ export class ApiError extends Error {
   status: number;
   code?: string;
   /** Parsed JSON error body, when the server sent one (e.g. the Stage 155
-   *  /regenerate 409 `{ error: 'layer_disabled', disabled_worker_types }`). */
+   *  /generate 409 `{ code: 'layer_disabled', disabled_layers }`). */
   body?: unknown;
   constructor(message: string, status: number, code?: string, body?: unknown) {
     super(message);
@@ -122,22 +122,23 @@ async function request<T>(path: string, init: RequestInit = {}, timeoutMs: numbe
 
 // ── О1 (reports/2026-11-07/orch-v2-image-scene-run.md): live state is never
 // answered from the browser HTTP cache. A mobile browser served a 3-minute-old
-// `progress-panel` (status active, 0/1) after the command had finished; with
+// progress poll (status active, 0/1) after the command had finished; with
 // `?x=1` / incognito the server answered `tasks: []`. Every GET of a polling or
 // restore endpoint therefore defaults to `cache: 'no-store'` HERE, in one
 // place, instead of at each call site (the backend also sends
 // `Cache-Control: no-store` on the same paths). Paths are endpoint-relative
 // (without API_BASE), the query string is ignored.
 const NO_STORE_GET_PATHS: readonly RegExp[] = [
-  // /book/:id/{progress-panel,progress-stream,assets-state,status,agent-status,layer-config,generation*}
-  /^\/book\/[^/?]+\/(?:progress-panel|progress-stream|assets-state|status|agent-status|layer-config|generation[^/?]*)(?:[/?]|$)/,
+  // /book/:id/{progress-stream,assets-state,status,agent-status,layer-config}
+  // (progress-panel and generation-state were removed 2026-11-28, ORCHESTRATION_V2 §11.3)
+  /^\/book\/[^/?]+\/(?:progress-stream|assets-state|status|agent-status|layer-config)(?:[/?]|$)/,
   // /scene/:book/:chapter/:scene/status
   /^\/scene\/[^/?]+\/[^/?]+\/[^/?]+\/status(?:[/?]|$)/,
   /^\/worker\/counts(?:[/?]|$)/,
   // v2 generation API (/generate/*), present and future
   /^\/generate(?:[/?]|$)/,
   // book-scoped generate API v2 (ADR ORCHESTRATION_V2 §11.1): /book/:id/generate,
-  // /generate/progress, /generate/stream (not /generate-next)
+  // /generate/progress, /generate/stream
   /^\/book\/[^/?]+\/generate(?:[/?]|$)/,
   // voice reference candidates of a hero (HERO_CARD.md §6) — polled every 3 s
   // while a design / upload command runs

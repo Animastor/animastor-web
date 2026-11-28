@@ -1,4 +1,4 @@
-// О1: progress-panel refresh requests (SSE / visible / pageshow → re-poll now).
+// О1: progress poll refresh requests (SSE / visible / pageshow → re-poll now).
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { requestPanelRefresh, onPanelRefreshRequested, sseEventRequestsPanelRefresh, waitForNextPoll } from './panelRefresh';
 

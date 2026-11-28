@@ -196,8 +196,9 @@ export function resetGenerationStatus(): void { setGenerationStatus('IDLE'); }
 // remains in the host.
 
 // ── Edit dirty indicator (GenerateViewModel.dirtySummary) ──
-// Populated from the /regenerate response summary (server-computed book diff) and
-// cleared on import/close — EditPage shows "Dirty: N changed…" while set.
+// Server-computed book diff; EditPage shows "Dirty: N changed…" while set,
+// cleared on import/close. Its only source was the /regenerate answer — since
+// that route was removed (2026-11-28, ORCHESTRATION_V2 §11.3) nothing sets it.
 export const dirtySummary = signal<DiffSummary | null>(null);
 export function setDirtySummary(s: DiffSummary | null): void { dirtySummary.value = s; }
 
@@ -434,7 +435,7 @@ const progressTracking: ProgressTrackingState = createProgressTrackingState();
 
 /** Clear in-flight generation tracking (GenerateViewModel.resetProgressState).
  *  Used by the Settings clear-storyboard flow — the book stays open, only the
- *  progress-panel tracking and playback state are reset. */
+ *  progress tracking and playback state are reset. */
 export function resetProgressState(): void {
   resetProgressTracking(progressTracking);
 }
@@ -545,7 +546,7 @@ export function clearVBookProgress(): void {
 
 // ═══════════════════════════════════════════════════════════════
 //  SSE PROGRESS STREAM (ProgressStream.kt equivalent)
-//  Advisory push channel; the 1.5s progress-panel poll reconciles.
+//  Advisory push channel; the 1.5s progress poll reconciles.
 // ═══════════════════════════════════════════════════════════════
 
 import { runSseStream } from '@animastor/web-generator-sse';
@@ -570,7 +571,7 @@ const sseStream = createSseStreamState();
 // О1 (reports/2026-11-07/orch-v2-image-scene-run.md): the routing of the
 // payload stays in @animastor/web-generator (routeProgressEvent); this host
 // tap only notices `generation_complete` / v2 `progress` (with command_id)
-// and asks the Generator's progress-panel loop to re-poll NOW
+// and asks the Generator's progress poll loop to re-poll NOW
 // (state/panelRefresh.ts). The panel poll stays authoritative.
 async function* tapPanelRefresh(events: AsyncGenerator<SseEvent>): AsyncGenerator<SseEvent> {
   for await (const ev of events) {
@@ -695,7 +696,7 @@ export type GenerationResult =
   | { ok: false; message: string; code?: 'layer_disabled' | 'no_user_action' | 'voice_reference_required' | 'book_has_no_text' };
 
 // ── Explicit user action (reports/2026-11-04/regenerate-sweep-fix.md) ──
-// A GPU command (/regenerate) is sent ONLY from a click handler: the caller
+// A GPU command (POST /generate) is sent ONLY from a click handler: the caller
 // passes a UserAction built from the click event right there. Effects,
 // timers, polls, SSE handlers and restore paths have no event and cannot build
 // one, so they cannot send a command by construction. The action is also sent
@@ -844,7 +845,7 @@ export async function startGeneration(req: GenerationRequest, action: UserAction
 
 /**
  * Stage 155 — «Повторить» / «Продолжить» for a blocked / interrupted task row.
- * Never automatic: the user presses the button and a NEW explicit /regenerate
+ * Never automatic: the user presses the button and a NEW explicit POST /generate
  * command with the same worker type and scope is sent (the backend supersedes
  * the stopped task). Returns null when the row has nothing to repeat.
  */
@@ -1006,7 +1007,7 @@ export const dismissedTaskIds = signal<ReadonlySet<string>>(new Set());
 
 /** «■ Снять» on a stopped (interrupted / blocked / failed) row: the same
  *  cancel-worker request as the ■ of an active row; on success the row
- *  disappears. Never sends /regenerate. */
+ *  disappears. Never sends a generate command. */
 export async function dismissStoppedTask(row: TaskRow): Promise<boolean> {
   if (!row.taskId) return false;
   const ok = await cancelTask(row.type, row.taskId);

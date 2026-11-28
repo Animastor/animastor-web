@@ -47,7 +47,7 @@ import {
 // (non-)SUCCESS value matters, so a minimal direct write via the exported
 // signal + the private arming path exercised through resetGenerationStatus is
 // NOT sufficient — the one-shot/watchdog timers are armed ONLY by the private
-// setGenerationStatus('SUCCESS'). Drive it through the real finalize path:// an empty progress-panel finalize (all rows expired → onGenerationFinalized).
+// setGenerationStatus('SUCCESS'). Drive it through the real finalize path:// an empty progress poll finalize (all rows expired → onGenerationFinalized).
 import * as store from './generateStore';
 import type { TaskLabels } from '@animastor/web-generator';
 import type { ProgressPanelResponse, ProgressTask } from '../api/models';

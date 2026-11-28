@@ -534,7 +534,7 @@ export function unitIndex(book: BookData | null, chapterId: string | null, scene
 
 // ─────────────────────────────────────────────────────
 // Generate screen (stage 4) — worker counts / progress panel /
-// agent status / layer config / regenerate
+// agent status / layer config
 // ─────────────────────────────────────────────────────
 
 // GET /worker/counts — WorkerCounts.kt
@@ -570,7 +570,10 @@ export interface WorkerCounts {
   available_active_video?: number;
 }
 
-// GET /book/{id}/progress-panel — ProgressPanelResponse/ProgressTask
+// Generator rows — ProgressPanelResponse/ProgressTask: the row model the Generator
+// renders; filled from the generate API v2 aggregate (features/generation/
+// generateApi.ts aggregateToPanel). The former GET /progress-panel was removed
+// 2026-11-28 (ORCHESTRATION_V2 §11.3).
 export interface ProgressPanelResponse {
   book_id?: string | null;
   tasks: ProgressTask[];
@@ -717,31 +720,7 @@ export interface RecentBooksResponse {
   books: RecentBook[];
 }
 
-// POST /book/{id}/regenerate — RegenerateRequest / RegenerateResponse
-export interface RegenerateRequest {
-  new_book?: BookData | null;
-  rebuild_all?: boolean;
-  worker_types?: string[] | null;
-  scope?: string | null;
-  chapter_id?: string | null;
-  scene_id?: string | null;
-  /** The click that sent the command (additive; 2026-11-04). */
-  client_action?: { kind: 'user_click'; source: string; action_id: string; trusted: boolean } | null;
-}
-
-export interface RegenerateResponse {
-  book_id?: string | null;
-  build_id?: string | null;
-  message?: string | null;
-  dirty_scenes?: { chapter_id?: string; scene_id?: string; reason?: string; dirty_layers?: string[] }[] | null;
-  /** Server-computed book diff (DiffSummary.kt) — feeds the Edit dirty indicator. */
-  summary?: DiffSummary | null;
-  marked?: number;
-  scope?: string | null;
-  tasks?: { task_id: string; type: string; target_count: number }[];
-}
-
-// DiffSummary.kt — counts reported after a regenerate/import (book diff).
+// DiffSummary.kt — counts of a server-computed book diff (Edit dirty indicator).
 export interface DiffSummary {
   total_scenes_old?: number;
   total_scenes_new?: number;
