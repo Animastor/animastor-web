@@ -35,7 +35,7 @@ import { ReasoningBudgetNotice, isReasoningBudgetError, reasoningBudgetProvider 
 //  - 4 worker sections (VBook/Audio/Image/Video): header row (accent bar, icon,
 //    label "Audio Workers: N", settings gear, toggle chip On/Off), progress rows
 //    (item_worker_progress), action buttons (Generate/Stop).
-//  - Worker counts polled every ~5s inside the progress-panel loop, no-store,
+//  - Worker counts polled every ~5s inside the progress poll loop, no-store,
 //    forced on mount / tab visible (updateSectionHeader icon states).
 //  - Progress panel polled every 1.5s (computeProgressRows), timer 500ms.
 //  - checkAndRestoreGenerationState 2.5s after mount.
@@ -148,7 +148,7 @@ export function GeneratePage(props: { path?: string }) {
   // refreshProgressUi + updateSectionHeader. The counts share the panel's
   // timer and `alive` flag, so they cannot stop while the panel keeps polling
   // (reports/2026-11-05/release-J.md §6.6: the chip froze for 30 min while
-  // progress-panel kept going). Both GETs are `no-store` (api/client.ts
+  // the progress poll kept going). Both GETs are `no-store` (api/client.ts
   // isNoStorePath). О1 (reports/2026-11-07/orch-v2-image-scene-run.md):
   //  - every request of the loop has its own 10 s timeout, so one hung fetch
   //    cannot stop the panel (it froze on 0/1 after a finished command);
@@ -615,7 +615,7 @@ function WorkerRow({ row, onStop, sceneCaption }: { row: TaskRow; onStop: () => 
   const countText = row.countText ?? (row.total > 0 ? `${row.ready}/${row.total}` : null);
   // GPU retry policy §ТЗ фронтам п.5: while the server pauses before a retry the
   // row stays ACTIVE (spinner + timer) and a small line counts down to retry_at
-  // by the CLIENT clock; once it passes → «Повтор…» until the next progress-panel
+  // by the CLIENT clock; once it passes → «Повтор…» until the next progress
   // poll. The frontend performs no actions — the server does the retry.
   const retry = row.retrying ? retryLine(true, row.retryNo, row.retryMax, row.retryAt, Date.now()) : null;
   const retryNote = retry == null ? null
@@ -757,7 +757,7 @@ export function StoppedRow({ row, name, countText, status, caption }: {
   );
 }
 
-// Stage 155 — «Повторить» / «Продолжить»: a NEW explicit /regenerate with the
+// Stage 155 — «Повторить» / «Продолжить»: a NEW explicit POST /generate with the
 // row's worker type and scope (never automatic).
 async function onRetry(row: TaskRow, ev: Event): Promise<void> {
   const res = await retryStoppedTask(row, userAction('generator.retry_row', ev));
@@ -822,7 +822,7 @@ function buildLabels(): TaskLabels {
 // A tap that OPENED the dialog (or a double tap on «Генерировать …») must
 // never also confirm it: «Старт» ignores activations during the first
 // SCOPE_DIALOG_ARM_MS after the dialog appeared (reports/2026-11-04/
-// regenerate-sweep-fix.md — a /regenerate the owner did not intend).
+// regenerate-sweep-fix.md — a command the owner did not intend).
 export const SCOPE_DIALOG_ARM_MS = 400;
 
 function ScopeDialog({ hasPosition, twoModes, onCancel, onStart }: {

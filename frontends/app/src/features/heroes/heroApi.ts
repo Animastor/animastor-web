@@ -6,7 +6,7 @@
 // module never patches local state.
 //
 // Generation endpoints (designVoiceCandidates) carry `client_action` exactly
-// like /regenerate: they may be called from a click handler only.
+// like POST /generate: they may be called from a click handler only.
 import { deleteJson, getJson, mediaUrl, patchJson, postForm, postJson } from '../../api/client';
 import type { DirtyScene, Hero, HeroRule, LookAssignment, LookFields, VoiceReference } from './heroModel';
 

@@ -5,14 +5,12 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { isNoStorePath, defaultGetCache, getJson, sse, POLL_REQUEST_TIMEOUT_MS, ApiError } from './client';
 
 const POLL_PATHS = [
-  '/book/ba_1/progress-panel',
   '/book/ba_1/progress-stream',
   '/book/ba_1/assets-state',
   '/book/ba_1/status',
   '/book/ba_1/agent-status',
   '/book/ba_1/layer-config',
-  '/book/ba_1/generation-status',
-  '/book/ba%201/progress-panel?x=1',
+  '/book/ba%201/assets-state?x=1',
   '/scene/ba_1/ch-1/sc-1/status',
   '/scene/ba_1/ch-1/sc-1/status?build_id=b1',
   '/worker/counts',
@@ -25,6 +23,9 @@ const POLL_PATHS = [
   '/book/X/generate/progress?t=1',
 ];
 const CACHEABLE_PATHS = [
+  // removed 2026-11-28 (ORCHESTRATION_V2 §11.3) — no longer polling paths
+  '/book/ba_1/progress-panel',
+  '/book/ba_1/generation-state',
   '/book/ba_1',
   '/books',
   '/scene/ba_1/ch-1/sc-1/waveform?build_id=b1',
@@ -57,7 +58,7 @@ describe('getJson → fetch (boundary)', () => {
   it('polling paths go out with cache: no-store, without any caller option', async () => {
     const fetchMock = vi.fn(async () => okJson({ tasks: [] }));
     vi.stubGlobal('fetch', fetchMock);
-    await getJson('/book/ba_1/progress-panel');
+    await getJson('/book/ba_1/generate/progress');
     await getJson('/worker/counts');
     await getJson('/book/ba_1/assets-state');
     await getJson('/scene/b/ch/sc/status');
@@ -97,7 +98,7 @@ describe('getJson → fetch (boundary)', () => {
     vi.stubGlobal('fetch', vi.fn((_u: string, init: RequestInit) => new Promise((_res, rej) => {
       init.signal?.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError')));
     })));
-    const p = getJson('/book/ba_1/progress-panel', { timeoutMs: POLL_REQUEST_TIMEOUT_MS });
+    const p = getJson('/book/ba_1/generate/progress', { timeoutMs: POLL_REQUEST_TIMEOUT_MS });
     const assertion = expect(p).rejects.toMatchObject({ status: 408 });
     await vi.advanceTimersByTimeAsync(POLL_REQUEST_TIMEOUT_MS);
     await assertion;

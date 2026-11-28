@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════
-//  Progress-panel refresh requests (О1, reports/2026-11-07/orch-v2-image-scene-run.md)
+//  Progress poll refresh requests (О1, reports/2026-11-07/orch-v2-image-scene-run.md)
 // ═══════════════════════════════════════════════════════════════
-//  The Generator's progress-panel poll (GeneratePage, 1.5 s) is the
+//  The Generator's progress poll (GeneratePage, 1.5 s) is the
 //  authoritative source of the task rows. This module lets other parts of
 //  the app ask that loop to poll NOW instead of waiting for the next tick:
 //   - an SSE `generation_complete`, or a `progress` event of a v2 command
@@ -18,14 +18,14 @@ type Listener = (reason: PanelRefreshReason) => void;
 
 const listeners = new Set<Listener>();
 
-/** Ask every mounted progress-panel loop to re-poll immediately. */
+/** Ask every mounted progress poll loop to re-poll immediately. */
 export function requestPanelRefresh(reason: PanelRefreshReason): void {
   for (const l of [...listeners]) {
     try { l(reason); } catch { /* a listener must not break the others */ }
   }
 }
 
-/** Subscribe a progress-panel loop; returns the unsubscribe function. */
+/** Subscribe a progress poll loop; returns the unsubscribe function. */
 export function onPanelRefreshRequested(listener: Listener): () => void {
   listeners.add(listener);
   return () => { listeners.delete(listener); };

@@ -3,6 +3,18 @@
 Нормативно — `animastor-docs` (`CHANGELOG.md`, `architecture/ORCHESTRATION_V2.md` §11,
 паритет — `architecture/ANDROID_WEB_PARITY.md`). Здесь — краткая запись по репозиторию.
 
+## 2026-11-28 — удалены legacy-эндпоинты backend: чистка клиента (ветка `chore/remove-legacy-endpoints`)
+
+- `api/client.ts` `isNoStorePath`: из списка убраны `progress-panel` и `generation*` (роуты удалены на backend,
+  `ORCHESTRATION_V2.md` §11.3). Тот же список, что у backend `middleware/no-store.js` и Android `PollRequests.kt`.
+- `api/models.ts`: удалены `RegenerateRequest` / `RegenerateResponse` (без использований); `ProgressPanelResponse` /
+  `ProgressTask` остаются — это модель строк Генератора (`aggregateToPanel`).
+- `features/generation/commandErrors.ts`: отказ старта распознаётся только в форме `/generate`
+  (`code: layer_disabled`, `disabled_layers`); форма удалённого `/regenerate` больше не обрабатывается.
+- Комментарии про `/regenerate` / `progress-panel` в `frontends/app` обновлены. UI не менялся. Пакеты
+  `@animastor/web-*` не менялись (живых вызовов удалённых путей в них нет).
+- vitest 475/0 (+1), `tsc --noEmit` OK, `vite build` OK.
+
 ## 2026-11-27 — no-store для `/book/:id/generate/*` (ветка `fix/gen-listen-nostore`)
 
 - `api/client.ts` `isNoStorePath`: добавлен `/book/:id/generate(/…)` — `GET /generate/progress` (полл панели) и
